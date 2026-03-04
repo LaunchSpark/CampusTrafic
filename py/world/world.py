@@ -1,67 +1,106 @@
 from __future__ import annotations
 
-"""Top-level world container that groups spatial, graph, and observation state."""
+"""Top-level world container that groups graph-ready and observation state."""
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from .connection import Connection
+from .device_map import DeviceMapBuilder, PipelinePaths
 from .graph import Graph
-from .grid import Grid
 from .types import DeviceId
+
+ConnectionsFromHere = list[dict[str, int | str]]
+TimeBucket = dict[str, ConnectionsFromHere]
+DateBucket = dict[str, TimeBucket]
+GraphsByWap = dict[str, DateBucket]
 
 
 @dataclass
 class World:
     """Canonical in-memory state for the WiFi-flow digital twin world."""
 
-    grid: Grid
-    graph: Graph
+    graph: Graph | None = None
+    graphs: GraphsByWap = field(default_factory=dict)
     device_connections: dict[DeviceId, list[Connection]] = field(default_factory=dict)
+    grid: None = None  # not implemented yet
+
+    def __post_init__(self) -> None:
+        if self.graph is None:
+            self.graph = Graph.build()
+
+    @staticmethod
+    def _date_and_time(timestamp_ms: int) -> tuple[str, str]:
+        dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+        return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M:%S")
+
+    @classmethod
+    def build_graphs(cls, device_connections: dict[DeviceId, list[Connection]]) -> GraphsByWap:
+        graphs: GraphsByWap = {}
+
+        for device_id, conns in device_connections.items():
+            ordered = sorted(
+                conns,
+                key=lambda conn: (conn.start_ts_ms if conn.start_ts_ms is not None else -1, str(conn.node_id)),
+            )
+            for idx in range(len(ordered) - 1):
+                current = ordered[idx]
+                nxt = ordered[idx + 1]
+
+                t_from = current.end_ts_ms if current.end_ts_ms is not None else current.start_ts_ms
+                t_to = nxt.start_ts_ms
+                if t_from is None or t_to is None:
+                    continue
+                dt_ms = t_to - t_from
+                if dt_ms < 0:
+                    continue
+
+                from_wap = str(current.node_id)
+                date_key, time_key = cls._date_and_time(t_from)
+                graphs.setdefault(from_wap, {}).setdefault(date_key, {}).setdefault(time_key, []).append(
+                    {
+                        "device_id": str(device_id),
+                        "to_wap": str(nxt.node_id),
+                        "t_from_ms": t_from,
+                        "t_to_ms": t_to,
+                        "dt_ms": dt_ms,
+                    }
+                )
+
+        return graphs
+
+    @classmethod
+    def construct(
+        cls,
+        paths: PipelinePaths | None = None,
+        threshold_ms: int = 300_000,
+    ) -> "World":
+        """Orchestrate raw->processed pipeline and return a world."""
+
+        builder = DeviceMapBuilder(paths=paths, threshold_ms=threshold_ms)
+        graph = Graph.build(device_map_builder=builder)
+        device_connections = builder.device_map.device_connections
+        return cls(
+            graph=graph,
+            graphs=cls.build_graphs(device_connections),
+            device_connections=device_connections,
+            grid=None,
+        )
 
     def validate(self) -> None:
-        """Validate world invariants.
-
-        Raises:
-            ValueError: If structural or temporal invariants are violated.
-        """
-
-        # TODO:
-        # - Validate graph referential integrity and unique IDs.
-        # - Ensure each Connection references an existing NodeId.
-        # - Enforce connection ordering/sorting and timestamp monotonicity per device.
-        # - Check grid bounds/cell size against graph coordinate extents.
         raise NotImplementedError("World.validate() is scaffolding-only for now.")
 
     def to_dict(self) -> dict[str, object]:
-        """Serialize world state to a plain dictionary representation."""
-
-        # TODO:
-        # - Define stable schema version for persisted world dictionaries.
-        # - Encode NewType identifiers and timestamps consistently.
-        # - Align output fields with py.io.artifacts/world_drafts conventions.
         raise NotImplementedError("World.to_dict() is scaffolding-only for now.")
 
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> "World":
-        """Build a world from a plain dictionary representation."""
-
-        # TODO:
-        # - Parse and validate required keys for grid/graph/device connections.
-        # - Enforce strict typing/normalization during ingestion.
-        # - Support schema upgrades for older draft/artifact versions.
         raise NotImplementedError("World.from_dict() is scaffolding-only for now.")
 
     def with_connections(self, device_connections: dict[DeviceId, list[Connection]]) -> "World":
-        """Return a shallow-copy world with replaced device connection mapping."""
-
-        # TODO:
-        # - Decide copy policy (deep copy vs. ownership transfer) for lists/records.
-        # - Preserve immutability expectations for downstream training/inference stages.
-        # - Clarify representation for teleportation/missing-observation segments.
-        return World(grid=self.grid, graph=self.graph, device_connections=device_connections)
-
-
-# TODO:
-# - Keep World as pure state: no routing, flow inference, or model-training behavior.
-# - Document invariants for per-device connection lists (sorted by time, non-null node IDs).
-# - Define downstream encoding for missing pings, gaps, and teleportation anomalies.
+        return World(
+            graph=self.graph,
+            graphs=self.build_graphs(device_connections),
+            device_connections=device_connections,
+            grid=None,
+        )
