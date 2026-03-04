@@ -14,8 +14,8 @@ from .types import DeviceId
 class World:
     """Canonical in-memory state for the WiFi-flow digital twin world."""
 
-    grid: Grid
-    graph: Graph
+    grid: Grid = field(default_factory=lambda: Grid(min_x=0.0, min_y=0.0, max_x=0.0, max_y=0.0, cell_size=1.0))
+    graph: Graph = field(default_factory=Graph)
     device_connections: dict[DeviceId, list[Connection]] = field(default_factory=dict)
 
     def validate(self) -> None:
