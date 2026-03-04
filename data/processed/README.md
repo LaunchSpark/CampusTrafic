@@ -1,18 +1,12 @@
-# Purpose
-Contain cleaned, validated, model-ready datasets.
+# Processed Data (`data/processed/`)
 
-# What goes here
-- Feature tables and normalized intermediates.
-- Validation-ready datasets used by modeling/eval steps.
+Stable intermediate datasets derived from raw Wi-Fi events.
 
-# What does NOT go here
-- Raw uncleaned source dumps.
-- Final run artifacts (`world`, `fields`, `metrics`, model trees).
+## Typical outputs
 
-# How it is used
-- Python engine writes deterministic transforms here.
-- Modeling and evaluation modules read from here.
-- Artifacts for serving are emitted to `data/artifacts/runs/<run_id>/`.
+- Device trajectories
+- Edge transitions
+- Cleaned/normalized timestamps
+- Derived labels (e.g., edge flow counts)
 
-# Notes
-- MVP requires deterministic transforms from `data/raw/`.
+This directory feeds model training and field generation.

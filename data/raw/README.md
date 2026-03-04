@@ -1,18 +1,11 @@
-# Purpose
-Hold immutable source-like inputs before feature engineering.
+# Raw Data (`data/raw/`)
 
-# What goes here
-- Imported datasets used to build monthly runs.
-- `real/` data snapshots from production-like sources.
+Landing area for source observations before transformation.
 
-# What does NOT go here
-- Model outputs, metrics, or generated fields.
-- Application code or API payload schemas.
+## Principles
 
-# How it is used
-- Python IO/batch logic reads from this folder.
-- Data should be append-only by run date or snapshot.
-- Downstream transforms write to `data/processed/`.
+- Preserve source fidelity.
+- Avoid destructive edits.
+- Keep auditability for retraining windows.
 
-# Notes
-- MVP requires at least one stable raw input feed.
+See `real/` for received Wi-Fi events.

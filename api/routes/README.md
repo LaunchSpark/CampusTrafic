@@ -1,18 +1,21 @@
-# Purpose
-Contain HTTP route handlers grouped by domain.
+# API Routes (`api/routes/`)
 
-# What goes here
-- Endpoint modules for run artifacts, world drafts, and training control.
-- Thin request parsing and response shaping logic.
+HTTP handlers grouped by domain.
 
-# What does NOT go here
-- Data science/model logic from `py/`.
-- Persistent artifact files.
+## What belongs here
 
-# How it is used
-- Implement high-level routes: `/runs`, `/runs/{run_id}/world`, `/runs/{run_id}/fields/index`, `/runs/{run_id}/fields/tiles/...`, `/runs/{run_id}/metrics/...`.
-- Implement draft routes: `/world/drafts`, `/world/drafts/{id}`, `/world/drafts/{id}/publish`.
-- Implement train routes: `/train/start`, `/train/status`, `/train/logs`, `/train/metrics/live`.
+- Request parsing and response shaping.
+- Route modules for artifacts, admin drafts, and training control.
+- Mapping HTTP semantics to service-layer calls.
 
-# Notes
-- MVP route handlers should stay thin and delegate immediately.
+## Keep route handlers thin
+
+- Validate request.
+- Call service.
+- Return typed schema response.
+
+## Route surface
+
+- `/runs*` for immutable artifact browsing.
+- `/world/drafts*` for editable world drafts.
+- `/train/*` for lifecycle, logs, and live metrics.

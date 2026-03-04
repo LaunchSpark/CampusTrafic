@@ -1,18 +1,12 @@
-# Purpose
-Define the field domain logic for the Python engine.
+# Field Domain (`py/field/`)
 
-# What goes here
-- Pure Python business logic, transformations, and domain utilities for field.
-- Functions/classes consumed by batch pipelines and artifact builders.
+Converts edge flows into continuous playback-ready spatial fields.
 
-# What does NOT go here
-- HTTP handlers, FastAPI request objects, or web concerns.
-- Persistent raw artifacts that belong under data directories.
+## Responsibilities
 
-# How it is used
-- Called from engine workflows to build run outputs.
-- Reads from data inputs via IO abstractions and writes via artifact writers.
-- Keeps deterministic behavior for monthly retrain runs.
+- Compute vector flow field `F(x,t)`
+- Compute density field `N(x,t)`
+- Apply spatial kernels around edges
+- Tile outputs for efficient UI streaming
 
-# Notes
-- MVP: required module boundary; implementation depth can grow incrementally.
+Outputs are persisted into run artifact `fields/` and `fields/tiles/`.

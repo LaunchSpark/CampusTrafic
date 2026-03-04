@@ -1,18 +1,13 @@
-# Purpose
-Store publishable artifacts produced by the Python engine.
+# Artifacts (`data/artifacts/`)
 
-# What goes here
-- Per-run outputs in `runs/`.
-- Editable draft world definitions in `world_drafts/`.
+Versioned outputs from training runs and editable world drafts.
 
-# What does NOT go here
-- Raw/processed training inputs.
-- API/web source code or temporary scratch files.
+## Structure
 
-# How it is used
-- Python engine writes run artifacts consumed by API endpoints.
-- FastAPI serves artifacts to the Web UI.
-- Admin actions may create/update world drafts.
+- `runs/` — immutable per-run exports.
+- `world_drafts/` — mutable admin draft graphs.
 
-# Notes
-- MVP requires stable artifact layout for API consumers.
+## Invariants
+
+- Published run artifacts are immutable.
+- Historical behavior must remain reproducible.

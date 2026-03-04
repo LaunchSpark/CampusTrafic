@@ -1,18 +1,15 @@
-# Purpose
-Define the batch domain logic for the Python engine.
+# Batch Jobs (`py/batch/`)
 
-# What goes here
-- Pure Python business logic, transformations, and domain utilities for batch.
-- Functions/classes consumed by batch pipelines and artifact builders.
+Periodic retraining pipeline orchestration (typically monthly).
 
-# What does NOT go here
-- HTTP handlers, FastAPI request objects, or web concerns.
-- Persistent raw artifacts that belong under data directories.
+## Standard pipeline
 
-# How it is used
-- Called from engine workflows to build run outputs.
-- Reads from data inputs via IO abstractions and writes via artifact writers.
-- Keeps deterministic behavior for monthly retrain runs.
+1. Ingest last 12 months of data.
+2. Clean and build movement traces.
+3. Compute edge-flow labels.
+4. Train hierarchical models.
+5. Evaluate model performance.
+6. Export artifacts to `data/artifacts/runs/{run_id}`.
+7. Precompute field tiles for playback.
 
-# Notes
-- MVP: required module boundary; implementation depth can grow incrementally.
+Output: a fully self-contained artifact set per run.

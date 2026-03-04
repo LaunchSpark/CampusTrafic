@@ -1,20 +1,13 @@
-# Purpose
-Store all persisted datasets and generated artifacts for monthly retrain runs.
+# Data Store (`data/`)
 
-# What goes here
-- Raw inputs under `raw/`.
-- Cleaned/feature-ready data under `processed/`.
-- Run outputs and world drafts under `artifacts/`.
-- File-based assets shared by Python engine, API, and Web UI.
+Filesystem-backed storage for ingestion, intermediate datasets, and immutable run artifacts.
 
-# What does NOT go here
-- Python source code, API code, or UI code.
-- Temporary local experiments outside defined subfolders.
+## Layout
 
-# How it is used
-- Python engine reads `raw/` + `processed/` and writes `artifacts/`.
-- FastAPI serves artifacts and world draft content from this tree.
-- Web UI consumes API responses derived from this tree.
+- `raw/` — immutable ingestion layer.
+- `processed/` — cleaned and structured traces + labels.
+- `artifacts/` — published run outputs and editable world drafts.
 
-# Notes
-- Required for MVP as the canonical filesystem data store.
+## Contract
+
+This tree is the canonical shared store used by batch training, FastAPI serving, and UI playback.
