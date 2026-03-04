@@ -1,0 +1,20 @@
+name: Compile All
+
+on:
+  pull_request:
+
+jobs:
+  compile-all:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Compile Python source with uv
+        run: |
+          uv python install 3.11
+          uv run --python 3.11 python -m compileall -q api backEnd frontEnd models py web
