@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+import numpy as np
 
 from py.io.csv_io import list_csv_files, read_csv_rows, write_csv_rows
 from py.io.paths import PROCESSED_DATA, RAW_DATA
@@ -94,7 +95,11 @@ class DeviceMapBuilder:
         return int(parsed.timestamp() * 1000)
 
     def normalize_raw_logs(self) -> Path:
-        rows_out: list[dict[str, str | int | None]] = []
+        devices: list[str] = []
+        waps: list[str] = []
+        starts: list[int] = []
+        ends: list[int] = []
+        end_valid: list[bool] = []
 
         for csv_file in list_csv_files(self.paths.raw_dir):
             for row in read_csv_rows(csv_file):
@@ -106,16 +111,31 @@ class DeviceMapBuilder:
                 if device is None or wap is None or t0 is None:
                     continue
 
+                devices.append(str(device))
+                waps.append(str(wap))
+                starts.append(int(t0))
+                ends.append(0 if t1 is None else int(t1))
+                end_valid.append(t1 is not None)
+
+        rows_out: list[dict[str, str | int | None]] = []
+        if devices:
+            devices_a = np.array(devices, dtype=object)
+            waps_a = np.array(waps, dtype=object)
+            starts_a = np.array(starts, dtype=np.int64)
+            ends_a = np.array(ends, dtype=np.int64)
+            end_valid_a = np.array(end_valid, dtype=bool)
+
+            order = np.lexsort((waps_a, starts_a, devices_a))
+            for idx in order:
                 rows_out.append(
                     {
-                        "device_id": str(device),
-                        "wap_id": str(wap),
-                        "start_ts_ms": t0,
-                        "end_ts_ms": t1,
+                        "device_id": str(devices_a[idx]),
+                        "wap_id": str(waps_a[idx]),
+                        "start_ts_ms": int(starts_a[idx]),
+                        "end_ts_ms": int(ends_a[idx]) if bool(end_valid_a[idx]) else None,
                     }
                 )
 
-        rows_out.sort(key=lambda row: (str(row["device_id"]), int(row["start_ts_ms"]), str(row["wap_id"])))
         observations_csv = self.paths.observations_dir / "observations_normalized.csv"
         write_csv_rows(observations_csv, rows_out, OBSERVATIONS_COLUMNS)
         return observations_csv
@@ -153,7 +173,9 @@ class DeviceMapBuilder:
         return traces
 
     @staticmethod
-    def _build_wap_time_index(traces: dict[DeviceId, list[Connection]]) -> dict[NodeId, list[tuple[int, DeviceId]]]:
+    def _build_wap_time_index(
+        traces: dict[DeviceId, list[Connection]],
+    ) -> dict[NodeId, tuple[np.ndarray, np.ndarray]]:
         wap_index: dict[NodeId, list[tuple[int, DeviceId]]] = defaultdict(list)
         for device, conns in traces.items():
             for conn in conns:
@@ -161,25 +183,32 @@ class DeviceMapBuilder:
                     continue
                 wap_index[conn.node_id].append((conn.start_ts_ms, device))
 
-        for events in wap_index.values():
+        arr_index: dict[NodeId, tuple[np.ndarray, np.ndarray]] = {}
+        for wap, events in wap_index.items():
             events.sort(key=lambda event: (event[0], str(event[1])))
-        return wap_index
+            times = np.array([event[0] for event in events], dtype=np.int64)
+            devices = np.array([event[1] for event in events], dtype=object)
+            arr_index[wap] = (times, devices)
+        return arr_index
 
     @staticmethod
     def _nearby_devices(
-        wap_index: dict[NodeId, list[tuple[int, DeviceId]]],
+        wap_index: dict[NodeId, tuple[np.ndarray, np.ndarray]],
         wap: NodeId,
         timestamp_ms: int,
         threshold_ms: int,
     ) -> set[DeviceId]:
-        events = wap_index.get(wap, [])
-        if not events:
+        indexed = wap_index.get(wap)
+        if indexed is None:
             return set()
 
-        times = [event_time for event_time, _ in events]
-        left = bisect_left(times, timestamp_ms - threshold_ms)
-        right = bisect_right(times, timestamp_ms + threshold_ms)
-        return {device for _, device in events[left:right]}
+        times, devices = indexed
+        if times.size == 0:
+            return set()
+
+        left = int(np.searchsorted(times, timestamp_ms - threshold_ms, side="left"))
+        right = int(np.searchsorted(times, timestamp_ms + threshold_ms, side="right"))
+        return {device for device in devices[left:right]}
 
     def build_parent_map(
         self,
