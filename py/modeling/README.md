@@ -1,18 +1,18 @@
-# Purpose
-Define the modeling domain logic for the Python engine.
+# Modeling Domain (`py/modeling/`)
 
-# What goes here
-- Pure Python business logic, transformations, and domain utilities for modeling.
-- Functions/classes consumed by batch pipelines and artifact builders.
+Predictive modeling for expected campus movement patterns.
 
-# What does NOT go here
-- HTTP handlers, FastAPI request objects, or web concerns.
-- Persistent raw artifacts that belong under data directories.
+## Responsibilities
 
-# How it is used
-- Called from engine workflows to build run outputs.
-- Reads from data inputs via IO abstractions and writes via artifact writers.
-- Keeps deterministic behavior for monthly retrain runs.
+- Global model training
+- Hierarchical model training
+- Decision tree construction/checkpointing
 
-# Notes
-- MVP: required module boundary; implementation depth can grow incrementally.
+## Typical hierarchy
+
+- term
+  - daytype
+    - day_of_week
+      - date
+
+Model outputs are exported under run `model_tree/`.

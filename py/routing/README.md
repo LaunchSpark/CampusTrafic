@@ -1,18 +1,11 @@
-# Purpose
-Define the routing domain logic for the Python engine.
+# Routing Domain (`py/routing/`)
 
-# What goes here
-- Pure Python business logic, transformations, and domain utilities for routing.
-- Functions/classes consumed by batch pipelines and artifact builders.
+Movement inference between nodes.
 
-# What does NOT go here
-- HTTP handlers, FastAPI request objects, or web concerns.
-- Persistent raw artifacts that belong under data directories.
+## Responsibilities
 
-# How it is used
-- Called from engine workflows to build run outputs.
-- Reads from data inputs via IO abstractions and writes via artifact writers.
-- Keeps deterministic behavior for monthly retrain runs.
+- Shortest path computation
+- Routing cache management
+- Travel time estimation
 
-# Notes
-- MVP: required module boundary; implementation depth can grow incrementally.
+Used to infer likely paths between sparse WAP detections.

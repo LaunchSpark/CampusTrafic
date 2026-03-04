@@ -1,18 +1,16 @@
-# Purpose
-Namespace all immutable artifacts by run identifier.
+# Run Artifacts (`data/artifacts/runs/`)
 
-# What goes here
-- One folder per run, e.g., `YYYY-MM-01` for monthly retrain.
-- Each run includes `model_tree/`, `metrics/`, `fields/`, and `world/`.
+Each folder is a monthly retrain snapshot: `runs/{run_id}/`.
 
-# What does NOT go here
-- Draft-only editable world content.
-- Cross-run temporary outputs or local notebooks.
+Example run id:
 
-# How it is used
-- Python engine writes a complete run package atomically.
-- FastAPI reads this structure for `/runs` and child endpoints.
-- Web UI selects a run and visualizes its artifacts.
+- `2026-03-01`
 
-# Notes
-- MVP supports read-only serving of completed runs.
+## Expected run contents
+
+- `model_tree/` — trained hierarchical model outputs
+- `metrics/` — evaluation summaries and drift artifacts
+- `fields/` — playback-ready vectors/densities and tiles
+- `world/` — exported graph + grid/coordinate specification
+
+Each run should be fully self-contained for playback and comparison.

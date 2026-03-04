@@ -1,18 +1,11 @@
-# Purpose
-Define the eval domain logic for the Python engine.
+# Evaluation Domain (`py/eval/`)
 
-# What goes here
-- Pure Python business logic, transformations, and domain utilities for eval.
-- Functions/classes consumed by batch pipelines and artifact builders.
+Model quality validation and drift detection.
 
-# What does NOT go here
-- HTTP handlers, FastAPI request objects, or web concerns.
-- Persistent raw artifacts that belong under data directories.
+## Responsibilities
 
-# How it is used
-- Called from engine workflows to build run outputs.
-- Reads from data inputs via IO abstractions and writes via artifact writers.
-- Keeps deterministic behavior for monthly retrain runs.
+- Validation scoring
+- Performance comparisons across runs
+- Run-level summary generation
 
-# Notes
-- MVP: required module boundary; implementation depth can grow incrementally.
+Outputs are written to run `metrics/` for API/UI consumption.

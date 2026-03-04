@@ -1,18 +1,14 @@
-# Purpose
-Define API request/response schemas and validation contracts.
+# API Schemas (`api/schemas/`)
 
-# What goes here
-- Pydantic (or equivalent) schemas for runs, fields, metrics, drafts, and training endpoints.
-- Shared enums/types used by route handlers.
+Data contracts for FastAPI endpoints.
 
-# What does NOT go here
-- Route implementation logic.
-- Storage-side artifact payload files.
+## Scope
 
-# How it is used
-- Shapes responses for `/runs*`, `/world/drafts*`, and `/train/*` endpoints.
-- Guards payload invariants before calling Python engine/storage.
-- Keeps API contracts stable for Web UI consumers.
+- Request/response models for run listing, world export, field indices/tiles, metrics, drafts, and training APIs.
+- Shared enums/types (time windows, run state, tile resolution, etc.).
 
-# Notes
-- MVP requires minimal but explicit schema coverage for key endpoints.
+## Design goals
+
+- Keep API contracts explicit and stable for the frontend.
+- Encode invariants close to boundaries.
+- Reflect artifact metadata structure (`fields/index.json`, run metadata, world versioning).

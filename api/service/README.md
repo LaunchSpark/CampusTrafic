@@ -1,18 +1,14 @@
-# Purpose
-Define FastAPI app bootstrapping and shared service composition.
+# API Service Layer (`api/service/`)
 
-# What goes here
-- App factory, dependency wiring, config loading, and lifecycle hooks.
-- Shared adapters that map HTTP calls to Python engine/storage operations.
+Composition and orchestration glue between routes and Python/data subsystems.
 
-# What does NOT go here
-- Heavy business logic or model computation.
-- UI assets except optional static mount declarations.
+## Responsibilities
 
-# How it is used
-- Initializes handlers for `/runs`, `/world/drafts`, and `/train/*` endpoint groups.
-- Connects route layer to filesystem-backed artifact access.
-- Enforces cross-cutting concerns (auth, logging, error mapping).
+- FastAPI app bootstrapping, dependency wiring, lifecycle hooks.
+- Service functions for artifact lookup/streaming and draft publishing.
+- Training job orchestration hooks (start/status/logs/live metrics).
 
-# Notes
-- MVP can keep bootstrapping simple but must keep engine coupling minimal.
+## Constraints
+
+- Keep heavy compute in `py/` or batch jobs.
+- Keep this layer deterministic and filesystem-aware.

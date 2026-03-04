@@ -1,18 +1,11 @@
-# Purpose
-Store editable world drafts before publishing to a run artifact.
+# World Drafts (`data/artifacts/world_drafts/`)
 
-# What goes here
-- Draft world documents created/updated by admin workflows.
-- Draft metadata (author, timestamps, validation state).
+Editable digital-twin graph versions used by administrators.
 
-# What does NOT go here
-- Immutable published run world artifacts.
-- Training metrics or field tile outputs.
+## Draft use-cases
 
-# How it is used
-- Admin panel edits drafts via `/world/drafts` endpoints.
-- API supports `/world/drafts`, `/world/drafts/{id}`, and publish flow.
-- Publishing later creates a world artifact under a run.
+- Node placement experiments
+- Edge connection edits
+- Routing weight changes
 
-# Notes
-- MVP supports draft CRUD; publish may be a controlled operation.
+Drafts are mutable until published into a production world version.
