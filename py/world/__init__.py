@@ -7,6 +7,8 @@ from py.io import world_drafts as drafts_io
 from py.io.paths import ARTIFACTS, DATA_ROOT, PROCESSED_DATA, RAW_DATA, REPO_ROOT, RUNS_DIR, WORLD_DRAFTS_DIR
 
 from .connection import Connection
+from .device_map import DeviceMap, DeviceMapBuilder
+from .device_pipeline import DevicePipeline, PipelinePaths
 from .graph import Edge, Graph, Node
 from .grid import Grid
 from .types import DeviceId, EdgeId, NodeId
@@ -14,8 +16,12 @@ from .world import World
 
 __all__ = [
     "Connection",
+    "DeviceMap",
+    "DeviceMapBuilder",
+    "DevicePipeline",
     "DeviceId",
     "Edge",
+    "PipelinePaths",
     "EdgeId",
     "Graph",
     "Grid",

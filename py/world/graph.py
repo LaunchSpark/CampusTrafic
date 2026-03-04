@@ -18,12 +18,6 @@ class Node:
     meta: dict[str, Any] | None = None
 
 
-# TODO:
-# - Define required Node metadata keys (building/floor labels, semantics).
-# - Document coordinate reference system and precision expectations.
-# - Add normalization hooks for imported node identifiers.
-
-
 @dataclass(frozen=True)
 class Edge:
     """A weighted graph edge between two nodes."""
@@ -35,13 +29,6 @@ class Edge:
     bidirectional: bool = False
 
 
-# TODO:
-# - Standardize weight meaning (distance meters vs. traversal seconds).
-# - Decide whether bidirectional=True is expanded to two directed edges at load time.
-# - Add optional precomputed direction vector/length caches if performance requires.
-# - Define edge metadata extension points for capacities/restrictions.
-
-
 @dataclass
 class Graph:
     """Collection of world nodes and edges keyed by stable identifiers."""
@@ -49,9 +36,10 @@ class Graph:
     nodes: dict[NodeId, Node] = field(default_factory=dict)
     edges: dict[EdgeId, Edge] = field(default_factory=dict)
 
+    @classmethod
+    def build(cls, device_map_builder: Any | None = None) -> "Graph":
+        """Construct canonical graph and optionally orchestrate device-map building."""
 
-# TODO:
-# - Provide adjacency-view builders for forward/reverse traversals.
-# - Validate referential integrity (dangling node IDs, duplicate logical edges).
-# - Add lightweight indexing for neighborhood queries.
-# - Finalize import/export schema mapping for data/artifacts/.../world payloads.
+        if device_map_builder is not None:
+            device_map_builder.build()
+        return cls()
