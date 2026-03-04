@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 
 from .connection import Connection
 from .device_map import DeviceMapBuilder, PipelinePaths
@@ -65,9 +66,13 @@ class World:
     def construct(
         cls,
         paths: PipelinePaths | None = None,
+        data_path: Path | None = None,
         threshold_ms: int = 300_000,
     ) -> "World":
         """Orchestrate raw->processed pipeline and return a world."""
+
+        if paths is None and data_path is not None:
+            paths = PipelinePaths(raw_dir=data_path)
 
         builder = DeviceMapBuilder(paths=paths, threshold_ms=threshold_ms)
         graph = Graph.build(device_map_builder=builder)
