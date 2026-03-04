@@ -32,5 +32,9 @@ def apply_parent_map(
     return World().with_connections(device_connections)
 
 
-def run_pipeline(paths: PipelinePaths | None = None, threshold_ms: int = 300_000) -> World:
-    return World.construct(paths=paths, threshold_ms=threshold_ms)
+def run_pipeline(
+    paths: PipelinePaths | None = None,
+    data_path: Path | None = None,
+    threshold_ms: int = 300_000,
+) -> World:
+    return World.construct(paths=paths, data_path=data_path, threshold_ms=threshold_ms)

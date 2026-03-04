@@ -44,7 +44,7 @@ Current `World` fields:
 
 Important methods:
 
-- `World.construct(paths=None, threshold_ms=300_000) -> World`
+- `World.construct(paths=None, data_path=None, threshold_ms=300_000) -> World`
 - `World.with_connections(device_connections) -> World`
 
 `graphs[wap][date][time]` list item schema:

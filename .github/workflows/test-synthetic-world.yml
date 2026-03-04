@@ -1,0 +1,20 @@
+name: Test Synthetic World Build
+
+on:
+  pull_request:
+
+jobs:
+  test-synthetic-world-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Build world with synthetic data
+        run: |
+          uv python install 3.11
+          uv run --python 3.11 python -c "from pathlib import Path; from py.world.world import World; World.construct(data_path=Path('data/raw/synthetic'))"
