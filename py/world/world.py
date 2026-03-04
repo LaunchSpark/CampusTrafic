@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from .connection import Connection
 from .device_map import DeviceMapBuilder, PipelinePaths
 from .graph import Graph
+from .trace_arrays import connections_to_columns, transition_columns
 from .types import DeviceId
 
 ConnectionsFromHere = list[dict[str, int | str]]
@@ -43,27 +44,18 @@ class World:
                 conns,
                 key=lambda conn: (conn.start_ts_ms if conn.start_ts_ms is not None else -1, str(conn.node_id)),
             )
-            for idx in range(len(ordered) - 1):
-                current = ordered[idx]
-                nxt = ordered[idx + 1]
-
-                t_from = current.end_ts_ms if current.end_ts_ms is not None else current.start_ts_ms
-                t_to = nxt.start_ts_ms
-                if t_from is None or t_to is None:
-                    continue
-                dt_ms = t_to - t_from
-                if dt_ms < 0:
-                    continue
-
-                from_wap = str(current.node_id)
+            transitions = transition_columns(connections_to_columns(ordered))
+            for idx in range(len(transitions.dt_ms)):
+                t_from = int(transitions.t_from_ms[idx])
+                from_wap = str(transitions.from_node[idx])
                 date_key, time_key = cls._date_and_time(t_from)
                 graphs.setdefault(from_wap, {}).setdefault(date_key, {}).setdefault(time_key, []).append(
                     {
                         "device_id": str(device_id),
-                        "to_wap": str(nxt.node_id),
+                        "to_wap": str(transitions.to_node[idx]),
                         "t_from_ms": t_from,
-                        "t_to_ms": t_to,
-                        "dt_ms": dt_ms,
+                        "t_to_ms": int(transitions.t_to_ms[idx]),
+                        "dt_ms": int(transitions.dt_ms[idx]),
                     }
                 )
 
