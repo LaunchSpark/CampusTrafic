@@ -36,10 +36,3 @@ class Graph:
     nodes: dict[NodeId, Node] = field(default_factory=dict)
     edges: dict[EdgeId, Edge] = field(default_factory=dict)
 
-    @classmethod
-    def build(cls, device_map_builder: Any | None = None) -> "Graph":
-        """Construct canonical graph and optionally orchestrate device-map building."""
-
-        if device_map_builder is not None:
-            device_map_builder.build()
-        return cls()

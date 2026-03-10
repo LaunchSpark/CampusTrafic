@@ -1,13 +1,15 @@
 # Python Engine (`py/`)
 
-Core computation engine (uv project) implemented as importable Python modules.
+Core computation logic implemented as importable pure Python modules.
 
 ## Role
 
-- Power batch training/retraining.
-- Provide deterministic domain logic for API orchestration.
-- Produce immutable run artifacts for UI playback.
+- Power data processing for the pure DAG `pipeline/`.
+- Produce immutable anemic data models (`World`, `Graph`, etc.) with no explicit I/O constraints.
+- Provide deterministic domain logic for modeling and analysis operations.
 
 ## Domains
 
-- `world/`, `routing/`, `flow/`, `field/`, `modeling/`, `eval/`, `io/`, plus `batch/` orchestration.
+- `world/`, `routing/`, `flow/`, `field/`, `modeling/`, `eval/`, and `io/`.
+(Note: Orchestration is now handled entirely outside this package via the `pipeline` engine and `run.py`)
+

@@ -10,5 +10,6 @@ Composition and orchestration glue between routes and Python/data subsystems.
 
 ## Constraints
 
-- Keep heavy compute in `py/` or batch jobs.
+- Keep heavy compute in the pure functional DAG `pipeline/` steps.
 - Keep this layer deterministic and filesystem-aware.
+
