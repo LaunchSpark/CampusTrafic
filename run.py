@@ -1,11 +1,15 @@
-from pipeline.run_logic import execute_pipeline
-
-STEPS = [
-    "01_init_world",
-    "02_build_devices",
-    "03_build_graph",
-    "04_build_grid",
-]
+import json
+from pathlib import Path
+from pipeline.run_logic.ast_runner import discover_and_run_pipeline
 
 if __name__ == "__main__":
-    execute_pipeline(STEPS)
+    config_path = Path("pipeline_config.json")
+    
+    # Load config dynamically from file if it exists, otherwise pass an empty dict for AST generation
+    if config_path.exists():
+        with open(config_path, "r", encoding="utf-8") as f:
+            PIPELINE_CONFIG = json.load(f)
+    else:
+        PIPELINE_CONFIG = {}
+        
+    discover_and_run_pipeline(PIPELINE_CONFIG)

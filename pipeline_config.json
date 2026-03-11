@@ -1,0 +1,59 @@
+{
+    "phase_00_syntheticGen": {
+        "step_01_build_world": {
+            "custom_param": 10
+        },
+        "step_02_explore": {
+            "custom_param": 10
+        },
+        "step_03_baseline": {
+            "custom_param": 10
+        },
+        "step_04_residual": {
+            "custom_param": 10
+        },
+        "step_05_visualize": {
+            "custom_param": 10
+        }
+    },
+    "phase_01_build_world": {
+        "step_01_build_devices": {
+            "is_synthetic": true
+        },
+        "step_02_build_wap_index": {
+            "is_synthetic": true
+        },
+        "step_03_resolve_people": {
+            "is_synthetic": true,
+            "threshold_minutes": 5.0,
+            "overlap_threshold": 0.8
+        },
+        "step_04_build_graph": {
+            "is_synthetic": true
+        }
+    },
+    "phase_02_explore": {
+        "step_01_clean": {
+            "is_synthetic": true,
+            "custom_param": 10
+        }
+    },
+    "phase_03_baseline": {
+        "step_01_baseline": {
+            "is_synthetic": true,
+            "custom_param": 10
+        }
+    },
+    "phase_04_residual": {
+        "step_01_residual": {
+            "is_synthetic": true,
+            "custom_param": 10
+        }
+    },
+    "phase_05_visualize": {
+        "step_01_visualize": {
+            "is_synthetic": true,
+            "custom_param": 10
+        }
+    }
+}

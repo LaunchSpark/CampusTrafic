@@ -1,0 +1,68 @@
+# AST Runner Implementation Walkthrough
+
+The pipeline execution framework has been overhauled to provide a cleaner, highly ergonomic Python development experience without losing the benefits of aggressive hashing and caching. 
+
+### The Problem
+
+Previously, hyperparameters could not be explicitly passed into pipeline steps through [run.py](file:///Users/lucasstarkey/Desktop/CampusTrafic/run.py) without bypassing the hashing engine, which would cause the cache to become stale if the hyperparameters changed. Passing steps to an executor via strings (`"02_build_devices"`) was also clunky and broke IDE type hinting.
+
+### The Solution: AST-Driven Execution
+
+By writing [run.py](file:///Users/lucasstarkey/Desktop/CampusTrafic/run.py) as a standard python function, we gain explicit function call definitions:
+
+```python
+def main() -> None:
+    init_world.run()
+    build_devices.run(threshold_ms=500_000)
+    build_graph.run()
+    build_grid.run()
+```
+
+The new [ast_runner.py](file:///Users/lucasstarkey/Desktop/CampusTrafic/pipeline/run_logic/ast_runner.py) uses `inspect` and Python's `ast` compiler tools to visually read and parse that [main()](file:///Users/lucasstarkey/Desktop/CampusTrafic/run.py#9-14) function *before* it executes.
+* It identifies the `module.run` statements.
+* It explicitly extracts kwargs like `threshold_ms=500_000`.
+* It bundles these kwargs into the cache hash.
+
+### Verification Results
+
+I tested executing the pipeline with the new engine under three scenarios.
+
+**1. Cold Start Execution**
+Everything ran as expected with the new syntax.
+```
+Detected Pipeline Outline:
+  - init_world.run(**{})
+  - build_devices.run(**{'threshold_ms': 300000})
+  - build_graph.run(**{})
+  - build_grid.run(**{})
+
+--- Evaluating Step: init_world ---
+[init_world] RUN (No cache found)
+...
+```
+
+**2. Warm Cache Execution**
+Running it a second time with no code or argument changes successfully triggered the cache bypass.
+```
+--- Evaluating Step: build_devices ---
+[build_devices] SKIP (SKIP)
+```
+
+**3. Hyperparameter Mutation**
+When I updated `threshold_ms` in [run.py](file:///Users/lucasstarkey/Desktop/CampusTrafic/run.py) to `500_000`, the AST scanner instantly caught the drift, and precisely re-evaluated that step (and any steps downstream relying on the new data) while successfully skipping isolated upstream steps.
+```
+--- Evaluating Step: init_world ---
+[init_world] SKIP (SKIP)
+
+--- Evaluating Step: build_devices ---
+[build_devices] RUN (Hyperparameters changed: {'threshold_ms': 300000} -> {'threshold_ms': 500000})
+
+--- Evaluating Step: build_graph ---
+[build_graph] RUN (Input data/artifacts/world_drafts/02_with_devices.pkl: mtime changed)
+```
+
+### Changes Review
+
+render_diffs(/Users/lucasstarkey/Desktop/CampusTrafic/pipeline/run_logic/__init__.py)
+render_diffs(/Users/lucasstarkey/Desktop/CampusTrafic/run.py)
+render_diffs(/Users/lucasstarkey/Desktop/CampusTrafic/pipeline/steps/02_build_devices.py)
