@@ -1,7 +1,7 @@
 {
     "phase_00_syntheticGen": {
         "step_01_build_world": {
-            "custom_param": 10
+            "num_lines": 1000
         },
         "step_02_explore": {
             "custom_param": 10
@@ -36,11 +36,17 @@
         "step_01_clean": {
             "is_synthetic": true,
             "custom_param": 10
+        },
+        "step_02_evaluation": {
+            "custom_param": 10
         }
     },
     "phase_03_baseline": {
         "step_01_baseline": {
             "is_synthetic": true,
+            "custom_param": 10
+        },
+        "step_02_evaluation": {
             "custom_param": 10
         }
     },

@@ -9,5 +9,5 @@ Optional static payloads served by FastAPI.
 
 ## Not for
 
-- Source frontend code (`web/`).
+- Source frontend code (`website/web/`).
 - Core run artifacts (`data/artifacts/`).

@@ -13,7 +13,7 @@ CampusTrafic uses a **clean monthly-retrain digital-twin architecture** driven b
 2. Build cleaned trajectories and edge-flow labels in `data/processed/`.
 3. Run monthly training via `run.py` to export immutable artifacts to `data/artifacts/runs/{run_id}/`.
 4. Serve artifacts and operational endpoints from `api/`.
-5. Render playback/admin/training experiences from `web/`.
+5. Render playback/admin/training experiences from `website/web/`.
 
 ## Core guarantees
 

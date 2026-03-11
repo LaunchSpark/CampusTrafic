@@ -18,8 +18,23 @@ def calculate_step_hash(step_name: str, step_module, kwargs: dict[str, Any]) -> 
     except OSError:
         source_code = inspect.getsource(step_module.run)
 
-    inputs_meta = {uri: get_input_meta(uri) for uri in getattr(step_module, "INPUTS", [])}
-    outputs_meta = {uri: get_output_meta(uri) for uri in getattr(step_module, "OUTPUTS", [])}
+    raw_inputs = getattr(step_module, "INPUTS", [])
+    raw_outputs = getattr(step_module, "OUTPUTS", [])
+    
+    # Pre-calculate the dynamic pathing substitutions if this is a synthetic run
+    # so the cache hashes the actual generated mocks instead of the missing real files
+    is_synthetic = kwargs.get("is_synthetic", False)
+    
+    # Some steps use explicitly indexed array routing, parse string matching
+    if is_synthetic:
+        resolved_inputs = [uri.replace('world_drafts', 'synthetic_drafts') for uri in raw_inputs]
+        resolved_outputs = [uri.replace('world_drafts', 'synthetic_drafts') for uri in raw_outputs]
+    else:
+        resolved_inputs = raw_inputs
+        resolved_outputs = raw_outputs
+
+    inputs_meta = {uri: get_input_meta(uri) for uri in resolved_inputs}
+    outputs_meta = {uri: get_output_meta(uri) for uri in resolved_outputs}
 
     state = {
         "step_name": step_name,

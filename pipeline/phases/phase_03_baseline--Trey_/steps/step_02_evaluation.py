@@ -33,56 +33,61 @@ read/write mock data safely without polluting the main production cache.
 
 from typing import Any
 from dataclasses import dataclass, field
-import random
-from datetime import datetime, timedelta
-import os
+from pipelineio.state import load_draft, save_draft
 
 # Define your anemic data structures here using @dataclass
 @dataclass
-class SyslogGenerator:
-    log_lines: list[str] = field(default_factory=list)
+class YourDataClass:
+    # Example state properties
+    items: list[str] = field(default_factory=list)
 
-    def process(self, num_lines: int = 1000, progress_callback=None) -> None:
+    def process(self, input_data: list[Any], custom_param: int = 10, progress_callback=None) -> None:
         """
-        Generates synthetic syslog data.
-        Format: MMM DD HH:MM:SS <Access Point IP> ah_auth: <Client MAC Address>
+        Your core business logic and transformations reside here.
         """
-        ap_ips = [f"10.0.{i}.{j}" for i in range(1, 5) for j in range(1, 10)]
-        macs = [f"00:1A:2B:{i:02X}:{j:02X}:{k:02X}" for i in range(1, 3) for j in range(1, 3) for k in range(1, 3)]
+        total_items = len(input_data)
         
-        start_date = datetime.now() - timedelta(days=1)
-        
-        for idx in range(num_lines):
-            if progress_callback and idx % max(1, num_lines // 50) == 0:
-                progress_callback(idx / max(1, num_lines))
+        for idx, item in enumerate(input_data):
+            # --- LIVE PROGRESS HOOK ---
+            # Update the progress bar periodically to prevent overwhelming the UI thread.
+            if progress_callback and idx % max(1, total_items // 50) == 0:
+                progress_callback(idx / max(1, total_items))
                 
-            ap_ip = random.choice(ap_ips)
-            # Add a slight bias to make some MACs more common
-            mac = random.choice(macs) if random.random() > 0.1 else macs[0]
-            
-            start_date += timedelta(seconds=random.randint(1, 60))
-            ts_str = start_date.strftime("%b %d %H:%M:%S")
-            
-            line = f"{ts_str} {ap_ip} ah_auth: {mac}"
-            self.log_lines.append(line)
+            # ... execute your logic ...
+            self.items.append(str(item).upper())
 
     def output(self, output_path: str) -> None:
-        """Writes the generated text lines out to the file."""
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as f:
-            for line in self.log_lines:
-                f.write(line + "\n")
+        """Persists the class state to disc via pickle."""
+        save_draft(self, output_path)
 
-INPUTS = []
-OUTPUTS = ['data/raw/synthetic/syslog.txt']
+    @classmethod
+    def load(cls, input_path: str) -> "YourDataClass":
+        """Loads a hydrated class instance from disc."""
+        return load_draft(input_path)
 
-def run(num_lines: int = 1000, progress_callback=None) -> None:
+
+# Declare the artifact paths this step depends on and generates
+INPUTS = ['data/artifacts/world_drafts/example_input.pkl']
+OUTPUTS = ['data/artifacts/world_drafts/example_output.pkl']
+
+
+def run(custom_param: int = 10, progress_callback=None) -> None:
     """
     The auto-discovered orchestrator entry point.
     Parameters defined here are strictly enforced against `run.py`'s PIPELINE_CONFIG.
     """
+    target_input = INPUTS[0]
     target_output = OUTPUTS[0]
     
-    data = SyslogGenerator()
-    data.process(num_lines=num_lines, progress_callback=progress_callback)
-    data.output(target_output)
+    # 1. Load inputs (mocked here, use actual dependent classes in practice)
+    # input_data = DependencyClass.load(target_input)
+    input_data = ["example_1", "example_2", "example_3"] 
+    
+    # 2. Instantiate this step's anemic data structure empty
+    data = YourDataClass()
+    
+    # 3. Execute business logic, passing down the target hyperparameters and callback
+    data.process(input_data, custom_param=custom_param, progress_callback=progress_callback)
+    
+    # 4. Save the populated output state for the next step to consume
+    # data.output(target_output)
