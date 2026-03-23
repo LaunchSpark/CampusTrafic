@@ -10,6 +10,7 @@ from pipeline.phases.phase_01_build_world.steps.step_02_build_wap_index import W
 @dataclass
 class Graph:
     spatialGraph: dict[str, list[tuple[str, Trace]]] = field(default_factory=lambda: defaultdict(list))
+    node_counts: dict[str, int] = field(default_factory=dict)
 
     def import_data(self, wap_index: WAPIndex, people: People) -> tuple[WAPIndex, People]:
         return wap_index, people
@@ -29,6 +30,11 @@ class Graph:
                 person_device = people.identityMap.get(original_device, original_device)
                 
                 self.spatialGraph[wap_id].append((person_device, trace))
+
+        # Count unique people per node
+        for wap_id, visits in self.spatialGraph.items():
+            unique_people = {person for person, _ in visits}
+            self.node_counts[wap_id] = len(unique_people)
 
     def output(self, output_path: str) -> None:
         # Standardize the dict before output
