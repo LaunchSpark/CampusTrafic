@@ -2,9 +2,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from pipelineio.state import load_draft, save_draft
-from pipeline.phases.phase_01_build_world.steps.step_01_build_devices import Trace
-from pipeline.phases.phase_01_build_world.steps.step_03_resolve_people import People
-from pipeline.phases.phase_01_build_world.steps.step_02_build_wap_index import WAPIndex
+from .step_01_build_devices import Trace
+from .step_03_resolve_people import People
+from .step_02_build_wap_index import WAPIndex
 
 
 @dataclass

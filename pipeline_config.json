@@ -1,5 +1,5 @@
 {
-    "phase_00_syntheticGen": {
+    "phase_00_syntheticGen--all": {
         "step_01_build_world": {
             "num_lines": 1000
         },
@@ -16,7 +16,7 @@
             "custom_param": 10
         }
     },
-    "phase_01_build_world": {
+    "phase_01_build_world--Lucas_Starkey": {
         "step_01_build_devices": {
             "is_synthetic": true
         },
@@ -32,7 +32,7 @@
             "is_synthetic": true
         }
     },
-    "phase_02_explore": {
+    "phase_02_explore--Trigg_Lampkins": {
         "step_01_clean": {
             "is_synthetic": true,
             "custom_param": 10
@@ -41,7 +41,7 @@
             "custom_param": 10
         }
     },
-    "phase_03_baseline": {
+    "phase_03_baseline--Trey_Gannod": {
         "step_01_baseline": {
             "is_synthetic": true,
             "custom_param": 10
@@ -50,13 +50,13 @@
             "custom_param": 10
         }
     },
-    "phase_04_residual": {
+    "phase_04_residual--Isaiah_Chastain": {
         "step_01_residual": {
             "is_synthetic": true,
             "custom_param": 10
         }
     },
-    "phase_05_visualize": {
+    "phase_05_visualize--Mikel_Gonzalez": {
         "step_01_visualize": {
             "is_synthetic": true,
             "custom_param": 10

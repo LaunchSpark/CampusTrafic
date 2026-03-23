@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from pipelineio.state import load_draft, save_draft
-from pipeline.phases.phase_01_build_world.steps.step_01_build_devices import DeviceList
-from pipeline.phases.phase_01_build_world.steps.step_02_build_wap_index import WAPIndex
+from .step_01_build_devices import DeviceList
+from .step_02_build_wap_index import WAPIndex
 
 
 @dataclass

@@ -1,15 +1,59 @@
 import hashlib
 import importlib
+import importlib.util
 import inspect
 import json
 import sys
 import pprint
 from pathlib import Path
 from typing import Any
+from types import ModuleType
 
 from pipelineio.config import PIPELINE_CACHE_DIR
 from pipelineio.explain import explain_meta_diff
 from pipelineio.meta import get_input_meta, get_output_meta
+
+
+def _sanitize_module_part(name: str) -> str:
+    sanitized = []
+    for ch in name:
+        sanitized.append(ch if ch.isalnum() or ch == "_" else "_")
+    result = "".join(sanitized)
+    if result and result[0].isdigit():
+        result = f"_{result}"
+    return result
+
+
+def _ensure_namespace_package(name: str, path: Path) -> None:
+    module = sys.modules.get(name)
+    if module is None:
+        module = ModuleType(name)
+        module.__path__ = [str(path)]
+        sys.modules[name] = module
+    else:
+        existing_path = list(getattr(module, "__path__", []))
+        if str(path) not in existing_path:
+            existing_path.append(str(path))
+            module.__path__ = existing_path
+
+
+def load_step_module(phase_dir: Path, step_file: Path):
+    phase_pkg = _sanitize_module_part(phase_dir.name)
+    base_pkg = f"pipeline.phases.{phase_pkg}"
+    steps_pkg = f"{base_pkg}.steps"
+    module_name = f"{steps_pkg}.{step_file.stem}"
+
+    _ensure_namespace_package(base_pkg, phase_dir)
+    _ensure_namespace_package(steps_pkg, phase_dir / "steps")
+
+    spec = importlib.util.spec_from_file_location(module_name, step_file)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load spec for {step_file}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module, module_name
 
 
 def calculate_step_hash(step_name: str, step_module, kwargs: dict[str, Any]) -> tuple[str, dict]:
@@ -194,17 +238,15 @@ def discover_and_run_pipeline(config: dict[str, Any] = None) -> None:
             
         step_files = sorted([f for f in steps_dir.glob("step_*.py") if f.is_file()])
         for step_file in step_files:
-            module_name = f"pipeline.phases.{phase_dir.name}.steps.{step_file.stem}"
-            discovered_steps.append((module_name, step_file.stem))
+            discovered_steps.append((phase_dir, step_file, step_file.stem))
 
     needs_update = False
 
-    for module_name, step_short_name in discovered_steps:
+    for phase_dir, step_file, step_short_name in discovered_steps:
         try:
-            step_module = importlib.import_module(module_name)
+            step_module, module_name = load_step_module(phase_dir, step_file)
             sig = inspect.signature(step_module.run)
-            parts = module_name.split(".")
-            phase_name = parts[2]
+            phase_name = phase_dir.name
             
             if phase_name not in config:
                 config[phase_name] = {}
@@ -246,16 +288,15 @@ def discover_and_run_pipeline(config: dict[str, Any] = None) -> None:
     
     # Calculate pad length per phase
     phase_pad_lengths = {}
-    for module_name, step_short_name in discovered_steps:
-        phase_name = module_name.split(".")[2]
+    for phase_dir, _step_file, step_short_name in discovered_steps:
+        phase_name = phase_dir.name
         if phase_name not in phase_pad_lengths:
             phase_pad_lengths[phase_name] = len(step_short_name)
         else:
             phase_pad_lengths[phase_name] = max(phase_pad_lengths[phase_name], len(step_short_name))
             
-    for module_name, step_short_name in discovered_steps:
-        parts = module_name.split(".")
-        phase_name = parts[2]
+    for phase_dir, step_file, step_short_name in discovered_steps:
+        phase_name = phase_dir.name
         pad_length = phase_pad_lengths.get(phase_name, 25)
         
         try:
@@ -276,7 +317,7 @@ def discover_and_run_pipeline(config: dict[str, Any] = None) -> None:
             print("-" * total_width)
 
         try:
-            step_module = importlib.import_module(module_name)
+            step_module, module_name = load_step_module(phase_dir, step_file)
             step_config = config.get(phase_name, {}).get(step_short_name, {})
             plan_and_execute_step(step_short_name, step_module, [], step_config, pad_length=pad_length)
         except Exception as e:
