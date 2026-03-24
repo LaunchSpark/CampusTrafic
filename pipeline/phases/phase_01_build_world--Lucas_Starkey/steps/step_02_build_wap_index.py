@@ -55,13 +55,9 @@ class WAPIndex:
 INPUTS = ['data/artifacts/world_drafts/01_device_list.pkl']
 OUTPUTS = ['data/artifacts/world_drafts/02_wap_index.pkl']
 
-def run(is_synthetic: bool = True) -> None:
-    # Allow independent step testing by overriding inputs with static mock objects if synthetic
+def run() -> None:
     target_input = INPUTS[0]
     target_output = OUTPUTS[0]
-    if is_synthetic:
-        target_input = target_input.replace('world_drafts', 'synthetic_drafts')
-        target_output = target_output.replace('world_drafts', 'synthetic_drafts')
         
     device_list = DeviceList.load(target_input)
     

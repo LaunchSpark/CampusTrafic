@@ -181,16 +181,10 @@ class People:
 INPUTS = ['data/artifacts/world_drafts/01_device_list.pkl', 'data/artifacts/world_drafts/02_wap_index.pkl']
 OUTPUTS = ['data/artifacts/world_drafts/03_people.pkl']
 
-def run(is_synthetic: bool = True, threshold_minutes: float = 5.0, overlap_threshold: float = 0.8, progress_callback=None) -> None:
-    # Allow independent step testing by overriding inputs with static mock objects if synthetic
+def run(threshold_minutes: float = 5.0, overlap_threshold: float = 0.8, progress_callback=None) -> None:
     target_input_1 = INPUTS[0]
     target_input_2 = INPUTS[1]
     target_output = OUTPUTS[0]
-    
-    if is_synthetic:
-        target_input_1 = target_input_1.replace('world_drafts', 'synthetic_drafts')
-        target_input_2 = target_input_2.replace('world_drafts', 'synthetic_drafts')
-        target_output = target_output.replace('world_drafts', 'synthetic_drafts')
 
     device_list = DeviceList.load(target_input_1)
     wap_index = WAPIndex.load(target_input_2)

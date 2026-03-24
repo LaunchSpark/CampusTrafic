@@ -52,16 +52,10 @@ import os
 run_id = os.environ.get('PIPELINE_RUN_ID', 'EXAMPLE_RUN_ID')
 OUTPUTS = [f'data/artifacts/runs/{run_id}/world/final_graph.pkl']
 
-def run(is_synthetic: bool = True) -> None:
-    # Allow independent step testing by overriding inputs with static mock objects if synthetic
+def run() -> None:
     target_input_1 = INPUTS[0]
     target_input_2 = INPUTS[1]
     target_output = OUTPUTS[0]
-    
-    if is_synthetic:
-        target_input_1 = target_input_1.replace('world_drafts', 'synthetic_drafts')
-        target_input_2 = target_input_2.replace('world_drafts', 'synthetic_drafts')
-        target_output = target_output.replace('world_drafts', 'synthetic_drafts')
 
     wap_index = WAPIndex.load(target_input_1)
     people = People.load(target_input_2)

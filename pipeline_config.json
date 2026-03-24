@@ -17,24 +17,16 @@
         }
     },
     "phase_01_build_world--Lucas_Starkey": {
-        "step_01_build_devices": {
-            "is_synthetic": true
-        },
-        "step_02_build_wap_index": {
-            "is_synthetic": true
-        },
+        "step_01_build_devices": {},
+        "step_02_build_wap_index": {},
         "step_03_resolve_people": {
-            "is_synthetic": true,
             "threshold_minutes": 5.0,
             "overlap_threshold": 0.8
         },
-        "step_04_build_graph": {
-            "is_synthetic": true
-        }
+        "step_04_build_graph": {}
     },
     "phase_02_explore--Trigg_Lampkins": {
         "step_01_clean": {
-            "is_synthetic": true,
             "custom_param": 10
         },
         "step_02_evaluation": {
@@ -43,7 +35,6 @@
     },
     "phase_03_baseline--Trey_Gannod": {
         "step_01_baseline": {
-            "is_synthetic": true,
             "custom_param": 10
         },
         "step_02_evaluation": {
@@ -52,13 +43,11 @@
     },
     "phase_04_residual--Isaiah_Chastain": {
         "step_01_residual": {
-            "is_synthetic": true,
             "custom_param": 10
         }
     },
     "phase_05_visualize--Mikel_Gonzalez": {
         "step_01_visualize": {
-            "is_synthetic": true,
             "custom_param": 10
         }
     }

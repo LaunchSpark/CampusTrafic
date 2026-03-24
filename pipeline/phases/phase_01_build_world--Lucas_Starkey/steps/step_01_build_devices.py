@@ -23,23 +23,30 @@ class DeviceList:
 
     def import_data(self, csv_path: Path | str) -> list[dict]:
         """Ingest raw signal CSVs into a flat list."""
+        import datetime
         rows = []
         try:
-            with open(csv_path, "r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
+            with open(csv_path, "r", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f, delimiter='|')
                 for row in reader:
-                    wap_id = row.get("wap_id")
-                    device_id = row.get("device_id")
-                    start_ts_str = row.get("start_ts_ms")
+                    wap_id = row.get("AccessPoint")
+                    device_id = row.get("ClientId")
+                    timestamp_str = row.get("Timestamp")
 
-                    if not device_id or not wap_id or not start_ts_str:
+                    if not device_id or not wap_id or not timestamp_str:
+                        continue
+
+                    try:
+                        dt = datetime.datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+                        start_ts_ms = int(dt.timestamp() * 1000)
+                    except ValueError:
                         continue
 
                     rows.append(
                         {
                             "device_id": device_id,
                             "wap_id": wap_id,
-                            "start_ts_ms": int(start_ts_str),
+                            "start_ts_ms": start_ts_ms,
                         }
                     )
         except FileNotFoundError:
@@ -47,40 +54,7 @@ class DeviceList:
 
         return rows
 
-    def import_synthetic_syslog(self, txt_path: Path | str) -> list[dict]:
-        """Ingest synthetic syslog data."""
-        import datetime
-        rows = []
-        try:
-            with open(txt_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    parts = line.split()
-                    if len(parts) >= 6 and parts[4] == "ah_auth:":
-                        ts_str = " ".join(parts[0:3])
-                        ap_ip = parts[3]
-                        mac = parts[5]
-                        
-                        current_year = datetime.datetime.now().year
-                        try:
-                            dt = datetime.datetime.strptime(f"{current_year} {ts_str}", "%Y %b %d %H:%M:%S")
-                            start_ts_ms = int(dt.timestamp() * 1000)
-                        except ValueError:
-                            continue
-                            
-                        rows.append(
-                            {
-                                "device_id": mac,
-                                "wap_id": ap_ip,
-                                "start_ts_ms": start_ts_ms,
-                            }
-                        )
-        except FileNotFoundError:
-            print(f"File {txt_path} not found. Skipping syslog import.")
 
-        return rows
 
     def process(self, raw_rows: list[dict]) -> None:
         """
@@ -127,23 +101,16 @@ class DeviceList:
 
 
 INPUTS = [
-    'data/raw/real/syslog.txt',
-    'data/raw/synthetic/syslog.txt'
+    'data/raw/real/OutputMulti.txt'
 ]
 OUTPUTS = ['data/artifacts/world_drafts/01_device_list.pkl']
 
-def run(is_synthetic: bool = True) -> None:
-    # Dynamically route to either synthetic or real datasets based on hyperparameter
+def run() -> None:
     target_output = OUTPUTS[0]
     device_list = DeviceList()
 
-    if is_synthetic:
-        target_output = target_output.replace('world_drafts', 'synthetic_drafts')
-        target_input = INPUTS[1] # The synthetic syslog path
-        raw_rows = device_list.import_synthetic_syslog(target_input)
-    else:
-        target_input = INPUTS[0] # The real CSV path
-        raw_rows = device_list.import_data(target_input)
+    target_input = INPUTS[0] # The real CSV path
+    raw_rows = device_list.import_data(target_input)
         
     device_list.process(raw_rows)
     device_list.output(target_output)
