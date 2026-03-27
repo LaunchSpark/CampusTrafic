@@ -1,98 +1,181 @@
 """
-PIPELINE STEP TEMPLATE
-======================
+phase_02_explore / step_01_clean.py
+====================================
+Explore the world artifacts.
 
-How to create a new pipeline step:
-1. Copy this file into your target phase directory: `pipeline/phases/phase_XX_name/steps/step_YY_name.py`
-2. Update the `INPUTS` and `OUTPUTS` lists with your desired artifact read/write paths.
-3. Rename `YourDataClass` to represent the core anemic data structure you are building.
-4. Write your business logic inside the methods of your dataclass.
-5. Modify the `run()` function to accept your required hyperparameters.
-
-About the Progress Bar:
------------------------
-If your step processes data in a loop and you want a live progress bar in the terminal:
-1. Include `progress_callback=None` in your `run()` function signature.
-2. Pass it down to your processing method.
-3. Periodically call `progress_callback(float)` with a value between 0.0 and 1.0.
-   Example: `progress_callback(current_idx / total_items)`
-4. Best Practice: To prevent the UI drawing from slowing down your logic, only 
-   trigger the callback every N iterations (e.g., `if idx % 50 == 0:`).
-
-About Hyperparameters:
-----------------------
-Any arguments you add to the `run()` signature (except `progress_callback` and `is_synthetic`) 
-will be automatically discovered by the orchestrator and appended to `PIPELINE_CONFIG` in `run.py`.
-
-About Synthetic Data:
----------------------
-The `is_synthetic` flag allows independent component testing. When True, the pipeline 
-automatically replaces the `world_drafts` directory with `synthetic_drafts`. This lets you 
-read/write mock data safely without polluting the main production cache.
+Current scope:
+  - Load Graph, InterpolatedJourneysData, and FieldData from phase 01
+  - Find the first Monday whose data falls in the 9:00–10:00 hour bucket
+  - Pick 10 representative WAPs (highest unique-person volume that hour)
+  - Print each WAP's flow vector and unique-person count for that hour
 """
+from __future__ import annotations
 
-from typing import Any
+import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
 from pipelineio.state import load_draft, save_draft
 
-# Define your anemic data structures here using @dataclass
+# ---------------------------------------------------------------------------
+# Phase 01 types (imported so pickling works when the module is loaded via
+# ast_runner — they must be in scope before unpickling)
+# ---------------------------------------------------------------------------
+from pipeline.phases.phase_01_build_world__Lucas_Starkey.steps.step_04_build_graph import Graph
+from pipeline.phases.phase_01_build_world__Lucas_Starkey.steps.step_06_interpolate_paths import (
+    InterpolatedJourneysData,
+)
+from pipeline.phases.phase_01_build_world__Lucas_Starkey.steps.step_07_build_field import FieldData
+
+# ---------------------------------------------------------------------------
+# Pipeline wiring
+# ---------------------------------------------------------------------------
+run_id = os.environ.get("PIPELINE_RUN_ID", "EXAMPLE_RUN_ID")
+
+INPUTS = [
+    f"data/artifacts/runs/{run_id}/world/final_graph.pkl",
+    f"data/artifacts/runs/{run_id}/world/final_journeys.pkl",
+    f"data/artifacts/runs/{run_id}/world/final_field.pkl",
+]
+OUTPUTS: list[str] = []   # exploration only — no artifact written yet
+
+TOP_N_WAPS      = 10
+TARGET_HOUR     = 9        # 09:00 – 10:00
+TARGET_WEEKDAY  = 0        # Monday (Python: Mon=0 … Sun=6)
+HOUR_MS         = 3_600_000
+
+
+# ---------------------------------------------------------------------------
+# Data class (placeholder — stores exploration results for future steps)
+# ---------------------------------------------------------------------------
 @dataclass
-class YourDataClass:
-    # Example state properties
-    items: list[str] = field(default_factory=list)
+class ExploreResult:
+    hour_key: int = 0
+    wap_rows: list[dict] = field(default_factory=list)
 
-    def process(self, input_data: list[Any], custom_param: int = 10, progress_callback=None) -> None:
-        """
-        Your core business logic and transformations reside here.
-        """
-        total_items = len(input_data)
-        
-        for idx, item in enumerate(input_data):
-            # --- LIVE PROGRESS HOOK ---
-            # Update the progress bar periodically to prevent overwhelming the UI thread.
-            if progress_callback and idx % max(1, total_items // 50) == 0:
-                progress_callback(idx / max(1, total_items))
-                
-            # ... execute your logic ...
-            self.items.append(str(item).upper())
-
-    def output(self, output_path: str) -> None:
-        """Persists the class state to disc via pickle."""
-        save_draft(self, output_path)
+    def output(self, path: str) -> None:
+        save_draft(self, path)
 
     @classmethod
-    def load(cls, input_path: str) -> "YourDataClass":
-        """Loads a hydrated class instance from disc."""
-        return load_draft(input_path)
+    def load(cls, path: str) -> "ExploreResult":
+        return load_draft(path)
 
 
-# Declare the artifact paths this step depends on and generates
-INPUTS = ['data/artifacts/world_drafts/example_input.pkl']
-OUTPUTS = ['data/artifacts/world_drafts/example_output.pkl']
+# ---------------------------------------------------------------------------
+# run()
+# ---------------------------------------------------------------------------
+def run(
+    is_synthetic: bool = True,
+    custom_param: int = 10,
+    progress_callback=None,
+    **kwargs,
+) -> None:
+    # ── Load world artifacts ────────────────────────────────────────────────
+    graph: Graph                            = load_draft(INPUTS[0])
+    journeys_data: InterpolatedJourneysData = load_draft(INPUTS[1])
+    field_data: FieldData                   = load_draft(INPUTS[2])
 
+    # ── Find first Monday 9:00-10:00 hour bucket ───────────────────────────
+    # FieldData stores hour_key as epoch-ms floored to the hour.
+    # Walk sorted hour keys and pick the first one that is a Monday 9 AM.
+    target_hk: int | None = None
+    for hf in sorted(field_data.hourly_fields, key=lambda h: h.hour_key):
+        dt = datetime.fromtimestamp(hf.hour_key / 1000.0, tz=timezone.utc)
+        if dt.weekday() == TARGET_WEEKDAY and dt.hour == TARGET_HOUR:
+            target_hk = hf.hour_key
+            break
 
-def run(is_synthetic: bool = True, custom_param: int = 10, progress_callback=None) -> None:
-    """
-    The auto-discovered orchestrator entry point.
-    Parameters defined here are strictly enforced against `run.py`'s PIPELINE_CONFIG.
-    """
-    # Allow independent step testing by overriding inputs with static mock objects if synthetic
-    target_input = INPUTS[0]
-    target_output = OUTPUTS[0]
-    
-    if is_synthetic:
-        target_input = target_input.replace('world_drafts', 'synthetic_drafts')
-        target_output = target_output.replace('world_drafts', 'synthetic_drafts')
-    
-    # 1. Load inputs (mocked here, use actual dependent classes in practice)
-    # input_data = DependencyClass.load(target_input)
-    input_data = ["example_1", "example_2", "example_3"] 
-    
-    # 2. Instantiate this step's anemic data structure empty
-    data = YourDataClass()
-    
-    # 3. Execute business logic, passing down the target hyperparameters and callback
-    data.process(input_data, custom_param=custom_param, progress_callback=progress_callback)
-    
-    # 4. Save the populated output state for the next step to consume
-    # data.output(target_output)
+    if target_hk is None:
+        print(f"No Monday {TARGET_HOUR}:00 hour found in the field data.")
+        return
+
+    target_dt = datetime.fromtimestamp(target_hk / 1000.0, tz=timezone.utc)
+    print(f"\n{'='*60}")
+    print(f"  First Monday {TARGET_HOUR}:00–{TARGET_HOUR+1}:00 bucket")
+    print(f"  Date (UTC): {target_dt.strftime('%Y-%m-%d %H:%M')}")
+    print(f"{'='*60}\n")
+
+    # ── Count unique people per WAP in that hour (from journeys) ────────────
+    wap_people: dict[str, set[str]] = {}
+    for journey in journeys_data.journeys:
+        for wp in journey.waypoints:
+            t = wp.timestamp
+            if int(t // HOUR_MS) * HOUR_MS == target_hk:
+                wap_people.setdefault(wp.wap_id, set()).add(journey.person_id)
+
+    # Sort by unique-person volume descending; take top N
+    top_waps = sorted(wap_people.keys(),
+                      key=lambda w: (-len(wap_people[w]), w))[:TOP_N_WAPS]
+
+    available = len(wap_people)
+
+    if not top_waps:
+        print(f"No WAPs with journey data in the Monday {TARGET_HOUR}:00 hour bucket.")
+        print("(Synthetic data may be sparse for this specific slot — "
+              "try a different TARGET_HOUR or TARGET_WEEKDAY.)")
+        return
+
+    # ── Collect field vectors for those WAPs ────────────────────────────────
+    # Map sample_id prefix → first matching FieldVector for the target hour
+    hourly_field = next(
+        (hf for hf in field_data.hourly_fields if hf.hour_key == target_hk),
+        None,
+    )
+
+    # Build edge-sample lookup: wap_a or wap_b → list of vectors at that WAP's
+    # immediate neighbourhood.  We pick the sample whose wap_a matches the WAP
+    # (i.e. it is the corridor segment leaving from that node).
+    sample_map: dict[str, list] = {}
+    if hourly_field:
+        sv_lookup: dict[str, object] = {v.sample_id: v for v in hourly_field.vectors}
+        for es in field_data.edge_samples:
+            sid = es.sample_id
+            if sid in sv_lookup:
+                fv = sv_lookup[sid]
+                sample_map.setdefault(es.wap_a, []).append(fv)
+
+    # ── Print summary table ─────────────────────────────────────────────────
+    col = "{:<32} {:>8} {:>10} {:>10} {:>10} {:>10}"
+    print(col.format("WAP ID", "People", "raw_u", "raw_v", "magnitude", "direction°"))
+    print("-" * 80)
+
+    result = ExploreResult(hour_key=target_hk)
+
+    for wap_id in top_waps:
+        people_count = len(wap_people.get(wap_id, set()))
+
+        # Average all field vectors for samples on edges leaving this WAP
+        fvs = sample_map.get(wap_id, [])
+        if fvs:
+            avg_raw_u  = sum(v.raw_u     for v in fvs) / len(fvs)
+            avg_raw_v  = sum(v.raw_v     for v in fvs) / len(fvs)
+            avg_mag    = sum(v.magnitude for v in fvs) / len(fvs)
+            import math
+            avg_dir_u  = sum(v.dir_u for v in fvs) / len(fvs)
+            avg_dir_v  = sum(v.dir_v for v in fvs) / len(fvs)
+            deg = math.degrees(math.atan2(avg_dir_v, avg_dir_u)) % 360
+        else:
+            avg_raw_u = avg_raw_v = avg_mag = 0.0
+            deg = float("nan")
+
+        row = {
+            "wap_id":        wap_id,
+            "people":        people_count,
+            "raw_u":         round(avg_raw_u,  2),
+            "raw_v":         round(avg_raw_v,  2),
+            "magnitude":     round(avg_mag,    2),
+            "direction_deg": round(deg,         1) if deg == deg else None,
+        }
+        result.wap_rows.append(row)
+
+        print(col.format(
+            wap_id[:32],
+            people_count,
+            f"{avg_raw_u:+.2f}",
+            f"{avg_raw_v:+.2f}",
+            f"{avg_mag:.2f}",
+            f"{deg:.1f}°" if deg == deg else "  n/a",
+        ))
+
+    print(f"  Showing top {min(TOP_N_WAPS, available)} of {available} WAP(s) "
+          f"with activity this hour.\n")

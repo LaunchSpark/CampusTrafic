@@ -105,11 +105,15 @@ INPUTS = [
 ]
 OUTPUTS = ['data/artifacts/world_drafts/01_device_list.pkl']
 
-def run() -> None:
-    target_output = OUTPUTS[0]
+def run(is_synthetic: bool = True, progress_callback=None, **kwargs):
     device_list = DeviceList()
 
-    target_input = INPUTS[0] # The real CSV path
+    if is_synthetic:
+        target_input = INPUTS[0].replace('real', 'synthetic').replace('OutputMulti.txt', 'splunk_synthetic_wap_events.csv')
+    else:
+        target_input = INPUTS[0]
+        
+    target_output = OUTPUTS[0]
     raw_rows = device_list.import_data(target_input)
         
     device_list.process(raw_rows)
