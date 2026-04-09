@@ -34,60 +34,62 @@ read/write mock data safely without polluting the main production cache.
 from typing import Any
 from dataclasses import dataclass, field
 from pipelineio.state import load_draft, save_draft
+from .step_01_baseline import BaselineTransitionModel
 
-# Define your anemic data structures here using @dataclass
 @dataclass
-class YourDataClass:
-    # Example state properties
-    items: list[str] = field(default_factory=list)
+class BaselineEvaluation:
+    # Example state properties for evaluation metrics
+    metrics: dict[str, float] = field(default_factory=dict)
 
-    def process(self, input_data: list[Any], custom_param: int = 10, progress_callback=None) -> None:
+    def process(self, baseline_model: BaselineTransitionModel, custom_param: int = 10, progress_callback=None) -> None:
         """
-        Your core business logic and transformations reside here.
+        Your baseline evaluation metrics/business logic reside here.
         """
-        total_items = len(input_data)
+        # --- LIVE PROGRESS HOOK ---
+        if progress_callback:
+            progress_callback(0.5)
+            
+        # TODO: Implement your evaluation comparison logic using `baseline_model`
+        self.metrics["example_score"] = 0.95
         
-        for idx, item in enumerate(input_data):
-            # --- LIVE PROGRESS HOOK ---
-            # Update the progress bar periodically to prevent overwhelming the UI thread.
-            if progress_callback and idx % max(1, total_items // 50) == 0:
-                progress_callback(idx / max(1, total_items))
-                
-            # ... execute your logic ...
-            self.items.append(str(item).upper())
+        if progress_callback:
+            progress_callback(1.0)
 
     def output(self, output_path: str) -> None:
         """Persists the class state to disc via pickle."""
         save_draft(self, output_path)
 
     @classmethod
-    def load(cls, input_path: str) -> "YourDataClass":
+    def load(cls, input_path: str) -> "BaselineEvaluation":
         """Loads a hydrated class instance from disc."""
         return load_draft(input_path)
 
 
 # Declare the artifact paths this step depends on and generates
-INPUTS = ['data/artifacts/world_drafts/example_input.pkl']
-OUTPUTS = ['data/artifacts/world_drafts/example_output.pkl']
+run_id = os.environ.get('PIPELINE_RUN_ID', 'EXAMPLE_RUN_ID')
+INPUTS = [f'data/artifacts/runs/{run_id}/model_tree/baseline_transitions.pkl']
+OUTPUTS = [f'data/artifacts/runs/{run_id}/model_tree/baseline_evaluation.pkl']
 
 
-def run(custom_param: int = 10, progress_callback=None) -> None:
+def run(is_synthetic: bool = True, custom_param: int = 10, progress_callback=None) -> None:
     """
     The auto-discovered orchestrator entry point.
-    Parameters defined here are strictly enforced against `run.py`'s PIPELINE_CONFIG.
     """
     target_input = INPUTS[0]
     target_output = OUTPUTS[0]
     
-    # 1. Load inputs (mocked here, use actual dependent classes in practice)
-    # input_data = DependencyClass.load(target_input)
-    input_data = ["example_1", "example_2", "example_3"] 
+    if is_synthetic:
+        target_input = target_input.replace('runs/' + run_id, 'synthetic_drafts')
+        target_output = target_output.replace('runs/' + run_id, 'synthetic_drafts')
     
-    # 2. Instantiate this step's anemic data structure empty
-    data = YourDataClass()
+    # 1. Load the model generated from step 01
+    baseline_model = BaselineTransitionModel.load(target_input)
     
-    # 3. Execute business logic, passing down the target hyperparameters and callback
-    data.process(input_data, custom_param=custom_param, progress_callback=progress_callback)
+    # 2. Instantiate this step's data structure
+    evaluation = BaselineEvaluation()
     
-    # 4. Save the populated output state for the next step to consume
-    # data.output(target_output)
+    # 3. Execute business logic
+    evaluation.process(baseline_model, custom_param=custom_param, progress_callback=progress_callback)
+    
+    # 4. Save the evaluated metrics
+    evaluation.output(target_output)

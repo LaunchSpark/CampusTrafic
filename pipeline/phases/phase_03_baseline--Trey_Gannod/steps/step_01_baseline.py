@@ -37,7 +37,8 @@ from datetime import datetime
 import os
 
 from pipelineio.state import load_draft, save_draft
-from pipeline.phases.phase_01_build_world__Lucas_Starkey import Graph
+# FIXED: Updated import path to target the specific step file
+from pipeline.phases.phase_01_build_world__Lucas_Starkey.steps.step_04_build_graph import Graph
 
 @dataclass
 class BaselineTransitionModel:
@@ -115,7 +116,8 @@ run_id = os.environ.get('PIPELINE_RUN_ID', 'EXAMPLE_RUN_ID')
 INPUTS = [f'data/artifacts/runs/{run_id}/world/final_graph.pkl']
 OUTPUTS = [f'data/artifacts/runs/{run_id}/model_tree/baseline_transitions.pkl']
 
-def run(is_synthetic: bool = True, time_threshold_minutes: int = 120, progress_callback=None) -> None:
+# FIXED: Added custom_param to satisfy pipeline_config.json
+def run(is_synthetic: bool = True, time_threshold_minutes: int = 120, custom_param: int = 10, progress_callback=None) -> None:
     target_input = INPUTS[0]
     target_output = OUTPUTS[0]
     
