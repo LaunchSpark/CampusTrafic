@@ -61,7 +61,7 @@
     "phase_03_baseline--Trey_Gannod": {
         "step_01_baseline": {
             "custom_param": 10,
-            "is_synthetic": true
+            "is_synthetic": false
         },
         "step_02_evaluation": {
             "custom_param": 10
