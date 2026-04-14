@@ -58,7 +58,7 @@ OUTPUTS = [
 
 
 def run(
-    is_synthetic: bool = False,   # 🔒 Force real data
+    is_synthetic: bool = False,   # Force real data
     custom_param: int = 10,
     progress_callback=None
 ) -> None:
@@ -68,7 +68,7 @@ def run(
     target_input = INPUTS[0]
     target_output = OUTPUTS[0]
 
-    # Safety check (helps debugging a TON)
+    # Safety check
     if not os.path.exists(target_input):
         raise FileNotFoundError(
             f"\nExpected input not found:\n{target_input}\n\n"
