@@ -8,9 +8,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import os
 
+from typing import Any
+
 from pipelineio.state import load_draft, save_draft
-# Import JourneysData instead of Graph
-from pipeline.phases.phase_01_build_world__Lucas_Starkey.steps.step_05_build_journeys import JourneysData
 
 @dataclass
 class BaselineTransitionModel:
@@ -23,7 +23,7 @@ class BaselineTransitionModel:
         default_factory=lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
     )
 
-    def process(self, journeys_data: JourneysData, time_threshold_minutes: int = 120, progress_callback=None) -> None:
+    def process(self, journeys_data: Any, time_threshold_minutes: int = 120, progress_callback=None) -> None:
         total_users = len(journeys_data.journeys)
         
         # 1. Iterate over the pre-built Journeys
@@ -82,8 +82,8 @@ class BaselineTransitionModel:
 # Environment and Paths
 run_id = os.environ.get('PIPELINE_RUN_ID', 'EXAMPLE_RUN_ID')
 
-# UPDATED: Ingest 05_raw_journeys.pkl instead of final_graph.pkl
-INPUTS = [f'data/artifacts/runs/{run_id}/world/05_raw_journeys.pkl']
+# Use interpolated journeys produced by world step 06.
+INPUTS = [f'data/artifacts/runs/{run_id}/world/final_journeys.pkl']
 OUTPUTS = [f'data/artifacts/runs/{run_id}/model_tree/baseline_transitions.pkl']
 
 def run(is_synthetic: bool = True, time_threshold_minutes: int = 120, custom_param: int = 10, progress_callback=None) -> None:
@@ -94,8 +94,8 @@ def run(is_synthetic: bool = True, time_threshold_minutes: int = 120, custom_par
         target_input = target_input.replace('runs/' + run_id, 'synthetic_drafts')
         target_output = target_output.replace('runs/' + run_id, 'synthetic_drafts')
     
-    # 1. Load Journeys Data
-    journeys_data = JourneysData.load(target_input)
+    # 1. Load interpolated journeys data from final_journeys.pkl
+    journeys_data = load_draft(target_input)
     
     # 2. Instantiate model
     model = BaselineTransitionModel()
