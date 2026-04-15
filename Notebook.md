@@ -1,240 +1,269 @@
-Here is a comprehensive, highly specific version of the project document. It leans into the depth and granular details of the second text, correcting its broken formatting while preserving the concrete use cases, expanded literature reviews, and detailed system architecture.
-
----
-
 # Wi-Fi Mesh Traffic Analysis for Campus Spatial Optimization
 
 **Mikel Gonzalez, Lucas Starkey, Trejan Gannod, Trigg Lampkins, Isaiah Chastain**
 
----
+## 1. Problem Statement
 
-### 1. Problem Statement
+This project studies whether anonymized Wi-Fi access point data can be used to estimate movement patterns inside Tennessee Tech University campus spaces. The immediate goal is to build a repeatable pipeline that turns raw WAP connection logs into interpretable traffic models and visual outputs that can support operational decisions.
 
-The objective of this project is to analyze Wi-Fi mesh data collected from wireless access points (WAPs) across Tennessee Tech University’s campus to model and visualize pedestrian traffic patterns. The initial phase of the project focuses on the Lab Science Commons (LSC) as a controlled pilot environment before expanding to additional campus buildings.
+The main research questions are:
 
-We aim to determine whether anonymized Wi-Fi device connection data can be used to statistically estimate movement patterns within campus spaces across different times of day and days of the week.
+- Can device-to-WAP association logs reveal meaningful daily and weekly pedestrian traffic patterns?
+- Can those patterns support decisions such as cleaning schedules, event placement, and space utilization?
+- Can the pipeline distinguish normal movement structure from unusual or residual traffic behavior?
 
-**Core Research Questions:**
+The data source is campus Wi-Fi connection activity, represented in this repository as raw syslog-style events and synthetic drafts for safe development. Success is measured less by a single classification score and more by whether the pipeline can consistently produce:
 
-* Can we identify statistically significant temporal traffic patterns (daily/weekly cycles)?
-* Can these patterns inform operational and student life decisions?
+- clean device traces,
+- stable WAP-level and person-level world models,
+- baseline movement predictions,
+- residual views that expose anomalies or drift, and
+- visualization-ready field outputs for downstream analysis.
 
-**Specific Campus Applications (Use Cases):**
+## 2. Background and Related Work
 
-* **Operational Efficiency:** Optimizing daytime cleaning schedules to reduce pedestrian disruption.
-* **Campus Engagement:** Identifying high-traffic zones for fundraising and engagement events.
-* **Event Planning:** Selecting highly visible locations for targeted events, such as “Careers and Coffee.”
-* **Marketing:** Informing the optimal placement of promotional materials.
+Wi-Fi-based occupancy and movement analysis is a practical alternative to manual counting, surveys, and GPS tracking. Manual methods do not scale well, surveys are sparse and subjective, and GPS is often unavailable or too invasive for indoor environments. Wi-Fi infrastructure already exists in campus buildings, so it provides an attractive passive sensing layer for mobility analysis.
 
-Data will be obtained in consultation with Jason Luna and campus IT administration to ensure proper legal and ethical compliance. All MAC addresses will be processed to preserve anonymity.
+Prior work has shown that Wi-Fi probe and association data can support both aggregate movement studies and origin-destination style inference. These studies also identify recurring challenges: a single person may carry multiple devices, WAP handoffs can generate noisy transitions, and overlapping coverage areas can blur the boundary between actual movement and network behavior.
 
----
+This project builds on those ideas but frames the work as a modular pipeline. Instead of stopping at occupancy counts, the repository is organized around phases that progressively build a world model, explore movement structure, train a baseline model, separate residual behavior, and render spatial outputs for evaluation and visualization.
 
-### 2. Background and related works 
+## 3. Data and Exploratory Analysis
 
-Wi-Fi–based occupancy and mobility modeling have become increasingly common in smart campuses and smart building research. Operational decisions such as cleaning schedules, event placements, promotion placement, and space optimization normally rely on guesswork rather than travel data. Without reliable traffic information, many of these decisions can lead to inefficient scheduling or event underperformance, as well as disruptions to regular student traffic. Data-driven approaches can help provide insights into how students move through the campus throughout the week. Improving our understanding of these travel patterns can allow the school's faculty to make better operational decisions and to optimize the best use of campus resources. 
+The data model in this repository is centered on device connection events. In `phase_01_build_world--Lucas_Starkey`, raw Wi-Fi observations are transformed into increasingly structured artifacts.
 
-Although many traditional methods for studying travel behavior can include travel surveys, manual student count, and GPS tracking, each of these methods have drawbacks. Travel surveys can become costly and time-consuming, with very little results. Manual counting only provides short snapshots of traffic activity and are often difficult to scale across large environments. GPS tracking provides detailed location data but introduces significant privacy concerns and challenges related to collecting personal location data. As a result, many researchers have explored opportunistic sensing, where existing digital infrastructure is used to infer travel patterns. 
+### Phase 01: Build World
 
-One influential study, Inferring Trips and Origin–Destination Flows from Wi-Fi Probe Data [1], demonstrated how Wi-Fi connectivity logs can be used to model movement across the university campus. In this study, each device's sequence of Wi-Fi access points is treated as a location trace that reflects movement over time. The authors then developed algorithms to detect resident patterns as well as segment stays and individual movements. One key contribution of this study is a trajectory inference approach that maps Wi-Fi transmissions to possible physical paths in a road network, which allows structured mobility modeling, like transportation demand analysis. However, the method also faces limitations due to signal overlap between access points, device-to-person ambiguity, and noise generated by transient device connections. 
+#### Step 01: Build Devices
 
-Another study, Large-Scale Movement Analysis from Wi-Fi-Based Location Traces [2], analyzes travel patterns using Wi-Fi association logs collected across hundreds of campus access points. Instead of just rebuilding individual trips, the authors focused on aggregate movement patterns by measuring transitions between locations. They introduced measurements such as flow across boundaries, which measures how many people travel within different areas, and place connectivity, which describes how often people move between two locations. These measurements help show how buildings and campus spaces are connected through daily movement. For instance, say that you have two buildings that show frequent movement between each other, even though they're not physically connected. While this approach does provide useful insights into how students move across campus, it only describes existing movement patterns. It doesn't account for future traffic or support operational planning decisions for possible new routes. 
+`step_01_build_devices.py` ingests raw logs and groups observations by device. Each device is converted into a chronologically ordered list of traces with:
 
-Despite all of the progress made in Wi-Fi-based movement research, there are still a few challenges that have yet to be faced. Students might carry multiple devices which can inflate count, giving false values.  Signal overlaps between access points can cause spatial ambiguity, and roaming behavior can create noisy transitions in location tracing. Researchers normally address these issues by using preprocessing techniques such as device filtering, dwelling time thresholds, and clusters access points into specified zones. Building on these methods, our project focuses on analyzing anonymized Wi-Fi connection data collected from the wireless access points around Tennessee Tech. Our initial analysis will focus on the lab Science Commons, where access points are mapped as spatial nodes within the building. By examining device connection sequences over time, our project aims to identify movement patterns and peak usage periods between these access points.  The analysis will comprise daily and weekly traffic patterns and congestion intervals between WAP locations. Rather than reconstructing common routes students use, the goal is to produce interpretable visualizations of movement patterns within the campus. These results will help us evaluate whether anonymized Wi-Fi connection data can provide reliable indicators of student activity and support operational decisions related to campus events. 
+- origin WAP,
+- origin connection timestamp,
+- destination WAP, and
+- destination connection timestamp.
 
-Here are some addition details about the two foundational IEEE studies mentioned before: 
+This step establishes the core movement record used by all later phases.
 
-Related Works: 
+#### Step 02: Build WAP Index
 
-Inferring Trips and Origin–Destination Flows from Wi-Fi Probe Data (Campus Case Study) 
+`step_02_build_wap_index.py` reorganizes the device traces into a WAP-centric index. For each WAP, the step stores sorted timestamps, device identifiers, and trace references. This makes temporal lookup efficient and supports overlap analysis in the next step.
 
-This study explores the use of Wi-Fi probe data as a scalable, low-cost alternative to traditional travel surveys and GPS-based mobility tracking. Traditional transportation data collection methods are often expensive, infrequent, and subject to recall bias, while GPS-based tracking raises significant privacy and regulatory concerns. 
+#### Step 03: Resolve People
 
-Using timestamped Wi-Fi connectivity logs collected over multiple months across a university campus, the authors treat each device’s sequence of access point (AP) associations as a location trace. From these traces, they develop algorithms to: 
+`step_03_resolve_people.py` attempts to group sibling devices that likely belong to the same person. It compares devices that appear at the same WAP within a configurable time window and uses overlap scoring to assign a primary device identity. This addresses one of the main data quality problems in Wi-Fi analytics: inflated counts caused by multi-device ownership and MAC-level fragmentation.
 
-Detect user resident patterns 
+#### Step 04: Build Graph
 
-Segment stays and trips 
+`step_04_build_graph.py` maps resolved identities back onto WAP visits to create a spatial graph representation. The resulting artifact tracks which primary identities visited each WAP and counts unique people per node. This graph becomes the canonical world-state output for the run.
 
-Infer individual-level movement 
+### Exploratory Observations
 
-Construct origin–destination (O-D) flow matrices 
+The exploratory value of this phase is not only in visualization, but in checking whether the raw data can support the later modeling tasks. Important questions include:
 
-A key methodological contribution is a road-network-based trajectory inference approach, improving interpretation of outdoor mobility by mapping inferred movements to plausible paths in physical space. 
+- How many device observations survive ingestion and cleaning?
+- Which WAPs dominate traffic volume?
+- How often do overlapping devices appear to represent the same person?
+- Are there suspiciously sparse or dense nodes that may indicate logging issues?
 
-Their results demonstrate that Wi-Fi probe data can reliably capture meaningful travel demand patterns and support transportation planning and smart-campus applications. Importantly, the study moves beyond aggregate counts and infers trip-level behavior, which directly informs O-D modeling and network-based movement analysis. 
+## 4. Methods and Tools
 
- 
+This section reflects both the current implementation in the repository and the corrected project direction from a later meeting. The current implementation is strongest in the pipeline orchestration and `phase_01_build_world--Lucas_Starkey`, while modeling and visualization remain planned extensions.
 
-Large-Scale Movement Analysis from Wi-Fi-Based Location Traces 
+### 4.1 Data Collection
 
-This earlier large-scale study analyzes mobility patterns derived from Wi-Fi association logs across approximately 400 access points. The authors focus particularly on indoor and mixed-environment mobility, where GPS data is unreliable or unavailable. 
+The primary intended data source for this study is anonymized Wi-Fi connection data collected from wireless access points (WAPs) distributed throughout Tennessee Tech University's campus. These logs are treated as a passive sensing mechanism for estimating pedestrian mobility without directly identifying individual people.
 
-Each device’s sequence of AP connections is interpreted as a temporal location trace. The passive, multi-month dataset enables analysis of both short-term movements and long-term mobility trends. 
+Each production connection record is expected to include:
 
-Key analytical contributions include: 
+- WAP ID,
+- hashed or otherwise anonymized device ID,
+- connection start timestamp, and
+- connection end timestamp when available.
 
-Place connectivity: quantifying the strength of transitions between two locations 
+The intended deployment context assumes coordination with campus IT administration so that privacy, access control, and institutional data-governance requirements are satisfied. The pilot study remains focused on the Lab Science Commons (LSC) before any broader campus rollout.
 
-Flow across boundaries: measuring movement between spatial regions 
+In the current repository, this production data source is represented by local stand-in files under `data/raw/`, including a real-data path and a synthetic syslog path used for development and testing.
 
-Temporal mobility variation: identifying peak activity periods tied to campus schedules 
+### 4.2 Data Preparation and Trace Construction
 
-The study reveals functional relationships between locations that are not obvious from geographic proximity alone. For example, two buildings may show strong transition flow despite being physically distant, indicating behavioral or academic linkage. 
+Raw connection logs must be transformed into device and person movement traces before any modeling can occur. The meeting summary identifies the main preprocessing goals as:
 
-This work establishes that Wi-Fi network traces can be repurposed for large-scale human mobility analysis without additional sensing infrastructure, forming a methodological foundation for later O-D inference research. 
+- timestamp normalization,
+- filtering incomplete or corrupted records,
+- resolving overlapping or ambiguous WAP associations,
+- grouping device-level observations into person-level traces,
+- and extracting node and time-interval features for later modeling.
 
- 
+That full preprocessing pipeline is not yet implemented end-to-end. What is implemented today in `phase_01_build_world--Lucas_Starkey` is a narrower but functional trace-construction workflow:
 
-Common Challenges Identified in Prior Research 
+- `step_01_build_devices.py` ingests raw rows and groups them by device,
+- device observations are sorted chronologically,
+- ordered observations are folded into traces that link one WAP observation to the next,
+- `step_02_build_wap_index.py` builds a WAP-centric index for fast temporal lookup,
+- and `step_03_resolve_people.py` merges likely sibling devices using overlap windows at shared WAPs.
 
-Across Wi-Fi mobility and occupancy modeling literature, several recurring challenges are noted: 
+As a result, the current pipeline already approximates mobility traces of the form
+`Device_i -> [(WAP_1, t1), (WAP_2, t2), (WAP_5, t3), ...]`, and then aggregates devices into person identities. However, it does not yet implement the full timestamp-normalization, data-cleaning, and feature-extraction workflow described in the meeting notes.
 
-Multiple-device ownership per individual, inflating counts 
+### 4.3 Spatial Graph Representation
 
-Signal overlap between WAPs, causing spatial ambiguity 
+The corrected meeting summary centers the project around a `World` object that contains two main components:
 
-Handoff noise and transient connections 
+- a `Graph` used for movement structure and modeling,
+- and a `Grid` used primarily for visualization.
 
-Spatial uncertainty in device movement inference 
+This object is only partially implemented today. The `Graph` portion exists in the current codebase, while the `Grid` remains a later phase.
 
-Privacy and anonymization constraints 
-
-These challenges require preprocessing steps such as device filtering, dwell-time thresholds, spatial clustering, and aggregation to higher-level zones. 
-
- 
-
-Modeling Approaches in the Literature 
-
-Prior research demonstrates the effectiveness of: 
-
-Time-series forecasting models (ARIMA, Prophet) for occupancy trends 
-
-Regression-based approaches for predictive modeling 
-
-Network-based metrics (connectivity strength, boundary flows) 
-
-Geospatial frameworks such as Web GIS and GeoPandas for spatial weighting and mapping 
-
-The evolution of the literature shows a clear shift from simple occupancy estimation toward structured mobility modeling, including trip segmentation and O-D matrix construction. 
-
- 
-
-Positioning of This Project 
-
-This project builds directly on the methodological foundations established in these studies by integrating: 
-
-Temporal modeling (forecasting and trend analysis) 
-
-Geospatial mapping (zone-based aggregation and spatial weighting) 
-
-Network-based movement modeling (flow matrices and connectivity graphs) 
-
-By combining occupancy estimation with inferred movement structure, this work aims to bridge smart-campus analytics and transportation-style O-D modeling within a unified Wi-Fi-based analytical framework. 
- 
-
- 
-
-References 
-
-[1] J. Jundee et al., “Inferring Trips and Origin–Destination Flows from Wi-Fi Probe Data: A Case Study of Campus Wi-Fi Network,” IEEE Access, 2023. 
-
-[2] A. Sevtsuk, S. Huang, F. Calabrese, and C. Ratti, “Large-Scale Movement Analysis from WiFi-Based Location Traces,” International Conference on Indoor Positioning and Indoor Navigation, 2012. 
- 
-[3] Z. Yang, C. Wu, and Y. Liu, “Locating in Fingerprint Space: Wireless Indoor Localization with Little Human Intervention,” Proceedings of the ACM International Conference on Mobile Computing and Networking, 2012. 
-
-[4] J. Scott, A. Brush, J. Krumm, B. Meyers, and S. Shafer, “PreHeat: Controlling Home Heating Using Occupancy Prediction,” UbiComp, 2011. 
-
- 
-
- 
-
- 
-
- 
-
----
-
-### 3. Data Structure and Exploratory Analysis
-
-The project begins with a detailed mapping of WAP locations within the LSC, modeling them as spatial nodes.
-
-**Required Data Fields & Entity Structure:**
-Each anonymized device entity will be structured to model movement sequences over time:
-
-* `ID`: Hashed device address
-* `connections`: Array of `[WAP ID, connection_start_timestamp, connection_end_timestamp]`
-
-**Cleaning and Preparation:**
-
-* Timestamp normalization to ensure consistent formats.
-* Removal of incomplete or corrupted connection logs.
-* Resolving overlapping connections when a device briefly associates with multiple WAPs.
-* Aggregation into fixed temporal intervals (e.g., 5-minute or hourly bins).
-
----
-
-### 4. Technical Methodology and Architecture
-
-#### 4.1 Spatial Graph Representation
-
-To interpret device movements, the campus environment is modeled as a spatial graph where intermediate movement must be inferred, as observations only occur at the nodes.
-
-* **Nodes:** Wireless Access Points (WAPs)
-* **Edges:** Walkable physical connections between WAP locations
-* **Edge Weights:** Distance or estimated travel time
-
-*Text-based network layout example:*
+In the intended design, the graph organizes movement between waypoints or WAP locations. The system treats node location as a core feature, and the meeting notes describe later modeling outputs in terms of waypoint-level movement vectors and traffic intensity.
 
 ```text
-WAP1 ─── WAP2 ─── WAP3
- │        │
-WAP4 ─── WAP5 ─── WAP6
-
+WAP1 --- WAP2 --- WAP3
+ |        |
+WAP4 --- WAP5 --- WAP6
 ```
 
-#### 4.2 Mobility Inference
+The current implementation is still more limited than that target design. `step_04_build_graph.py` builds a WAP-keyed visit structure that maps resolved identities onto WAP visits and records node-level unique-person counts. It does not yet implement the full `Grid` component or a mature waypoint graph used for continuous visualization.
 
-When a device transitions between two WAPs, the shortest path between those nodes is computed using standard graph routing algorithms, and the transition is expanded across the edges along that path. This produces directed edge flow counts represented as:
-$f_{e,t}$
-Where $e$ is a directed edge in the graph, $t$ is the time window, and $f_{e,t}$ represents the estimated number of devices moving along that edge during that interval.
+### 4.4 Mobility Inference
 
-#### 4.3 Spatial Flow Field Construction
+The current direction of the project is to infer movement edges between waypoints from device connection sequences. Input Wi-Fi association events are first converted into device movement sequences and then aggregated into person movement traces. From those traces, the intended system extracts three main features for each node and time interval:
 
-Estimated edge flows are converted into a spatial vector field representing the aggregate direction and intensity of pedestrian movement. For each location $x$ and time window $t$:
+- node location,
+- movement vector,
+- and traffic intensity.
 
-$$F(x,t) = \sum_{e} w(x,e) f_{e,t} \hat{u}_e$$
+The graph component is intended to process device connection data into movement edges between waypoints. In practice, that means the final system should move from raw association records toward node-level and interval-level movement predictions rather than only device visit histories.
 
-Where:
+This target behavior is only partially implemented. The current repository builds traces and WAP-keyed visit structures, but it does not yet complete the full node-interval feature extraction and predictive movement-edge workflow described in the meeting summary.
 
-* $f_{e,t}$ is the flow along edge $e$.
-* $\hat{u}_e$ is the unit direction vector of edge $e$.
-* $w(x,e)$ is a spatial kernel describing how strongly edge $e$ influences location $x$.
+### 4.5 Spatial Flow Field Construction
 
-This mathematical foundation produces both a vector field (showing dominant movement directions) and an intensity field (representing aggregate device volume).
+The visualization plan uses a grid generated from waypoint graph data. In that design, each node is associated with a movement vector representing pedestrian flow, and interpolation between nodes produces a continuous vector field across the environment.
 
-#### 4.4 Temporal Pattern Modeling Hierarchy
+The `Grid` component is meant to support this layer. Its primary role is visualization rather than modeling, and it is intended to hold the information needed to turn discrete waypoint predictions into an explorable flow map.
 
-To capture temporal dynamics accurately, mobility patterns are modeled across a strict hierarchy:
+This layer remains planned rather than implemented. The current repository does not yet construct the `Grid` object, interpolate vector fields across space, or render a finished grid-based flow map in the frontend.
 
-1. **Global Model:** Captures overall baseline traffic trends.
-2. **Semester Level:** Accounts for macro-variations (e.g., Fall vs. Spring).
-3. **Day Type:** Differentiates weekday vs. weekend patterns.
-4. **Day of Week:** Isolates Monday–Sunday specific variations.
-5. **Specific Date:** Accounts for local variations, holidays, and anomalous events.
+### 4.6 Temporal Pattern Modeling
 
-#### 4.5 System Architecture & Tools
+The corrected meeting notes define a two-stage modeling plan: baseline models first, then machine-learning refinement.
 
-The analytical pipeline uses a Python-based computational engine with a lightweight web visualization interface.
+The intended baseline strategy includes three candidate models:
 
-* **Data Processing & Modeling:** Python, NumPy, Pandas (data processing), NetworkX (graph routing), GeoPandas (spatial modeling).
-* **Backend Service:** FastAPI (serving data and model artifacts like flow field tiles).
-* **Visualization Platform:** JavaScript web interface utilizing interactive spatial libraries for rendering vector fields, heatmaps, and time-of-day traffic exploration.
+- Baseline Model 1: average traffic for each hour across all days,
+- Baseline Model 2: average traffic for each hour within each weekday,
+- Baseline Model 3: grouped weekdays, with Monday-Wednesday, Tuesday-Thursday, Friday, and weekends treated separately.
 
- 
+After selecting the strongest baseline, the plan is to train a decision tree model on the residual error between predicted and actual values. The meeting summary also specifies that multiple tree models should be tested using combinations of node location, movement vector, traffic intensity, and day-of-week features.
 
-### 5. Results 
+The current repository does not yet implement these baseline models or the residual decision-tree stage in code. The baseline and residual phases remain scaffolds plus modeling notes, so this section describes the agreed modeling direction rather than completed functionality.
 
-### 6. Conclusions and Future Work 
+### 4.7 System Architecture
 
-### 7. Appendix 
+The project uses a pipeline-based architecture managed by `run.py`. Each stage of the workflow is broken into ordered step files with declared inputs and outputs. The pipeline computes hashes over source code, inputs, outputs, and hyperparameters so that unchanged steps can be skipped and cached artifacts reused rather than recomputed.
+
+The current system implements the following pieces:
+
+- `run.py` orchestrates pipeline execution,
+- `pipeline/run_logic/ast_runner.py` manages step discovery, caching, and execution,
+- `pipelineio` persists draft and run artifacts,
+- FastAPI exposes routes for runs, world drafts, and training/status surfaces,
+- and the React frontend provides data-loading and training placeholder pages.
+
+The meeting notes position the `World` object as the central structural component of the system. In that intended architecture, all movement data and later modeling outputs would be organized through the `World`, with `Graph` supporting movement structure and `Grid` supporting visualization. The current repository only partially realizes that architecture.
+
+### 4.8 Tools and Technologies
+
+The current codebase clearly uses:
+
+- Python for the pipeline and backend services,
+- NumPy for indexed WAP and timestamp processing,
+- FastAPI for API routes,
+- React and Vite for the web frontend,
+- Bootstrap for frontend styling,
+- and Git-based repository collaboration.
+
+The revised full pipeline is expected to expand beyond the current implementation. Candidate or planned tools include:
+
+- additional preprocessing utilities for feature extraction,
+- decision-tree modeling tools for residual learning,
+- grid-based interpolation utilities for vector-field generation,
+- and interactive spatial visualization libraries for traffic flow exploration.
+
+Those tools should be described as planned additions to the full pipeline, not as components already used throughout the current repository.
+
+### 4.9 Evaluation Strategy
+
+The meeting summary defines success in terms of both predictive quality and interpretability. Quantitatively, the later modeling stages are intended to compare multiple baselines, select the strongest one, and then measure whether residual learning improves traffic prediction quality across nodes and time intervals.
+
+Qualitatively, the final system should support interactive inspection of movement directions and traffic density, making the outputs understandable to project stakeholders rather than only to the modeling team.
+
+These goals remain future-facing. The current implementation does not yet produce the node-level predicted traffic levels, direction vectors, or finished interactive flow maps needed for full evaluation.
+
+## 5. Results
+
+The current repository produces reliable pipeline and world-building artifacts but not yet the full predictive outputs described in the corrected meeting summary. The strongest completed results are that the system can:
+
+- discover and run pipeline steps with caching,
+- ingest synthetic or stand-in raw Wi-Fi log data,
+- construct ordered device traces,
+- build a WAP-centric index,
+- resolve likely sibling devices into person-level identities,
+- and export a final graph-like world artifact keyed by WAP visits.
+
+Those results support the claim that the project has a functioning orchestration layer and a first-stage world-building backbone. They do not yet establish a completed `Grid` component, node-level movement predictions, baseline-model comparisons, decision-tree residual learning, or stakeholder-ready interactive flow visualization.
+
+The current result is therefore foundational rather than predictive: the repository can build and cache intermediate movement structures, while the corrected meeting direction describes the next layers that still need to be implemented.
+
+## 6. Conclusions and Future Work
+
+This project has established a workable first-stage pipeline for campus Wi-Fi mobility analysis, and the corrected meeting summary clarifies the architectural direction. The current implementation shows that stand-in Wi-Fi logs can be transformed into structured traces, WAP indexes, resolved identities, and world artifacts under a reusable cached pipeline. That is a meaningful systems result, but it is still only the first layer of the intended platform.
+
+The agreed next steps are:
+
+- complete the `World` object by adding the `Grid` component,
+- expand preprocessing and feature extraction for node-level and time-interval modeling,
+- implement the three baseline traffic models,
+- train and compare decision-tree residual models over the selected features,
+- generate grid-based vector-field visualizations from waypoint data,
+- and connect those outputs to the frontend for interactive exploration.
+
+If those pieces are implemented, the project will move from a world-construction prototype to a full campus mobility analysis system aligned with the corrected meeting direction.
+
+## 7. Appendix
+
+Repository:
+
+- `CampusTrafic` local project workspace
+- [https://github.com/LaunchSpark/CampusTrafic](https://github.com/LaunchSpark/CampusTrafic)
+
+Current implementation references:
+
+- `run.py`
+- `pipeline/phases/phase_01_build_world--Lucas_Starkey/steps/step_01_build_devices.py`
+- `pipeline/phases/phase_01_build_world--Lucas_Starkey/steps/step_02_build_wap_index.py`
+- `pipeline/phases/phase_01_build_world--Lucas_Starkey/steps/step_03_resolve_people.py`
+- `pipeline/phases/phase_01_build_world--Lucas_Starkey/steps/step_04_build_graph.py`
+- `api/main.py`
+- `api/routes/`
+- `website/web/src/routes/DataPage.jsx`
+- `website/web/src/routes/TrainPage.jsx`
+
+Planned-phase and architecture references:
+
+- `pipeline/phases/phase_02_explore--Trigg_Lampkins/FLOW_README.md`
+- `pipeline/phases/phase_02_explore--Trigg_Lampkins/ROUTING_README.md`
+- `pipeline/phases/phase_03_baseline--Trey_Gannod/MODELING_README.md`
+- `pipeline/phases/phase_04_residual--Isaiah_Chastain/MODELING_README.md`
+- `pipeline/phases/phase_05_visualize--Mikel_Gonzalez/FIELD_README.md`
+- `pipeline/phases/phase_05_visualize--Mikel_Gonzalez/EVAL_README.md`
+
+Primary data and artifact locations:
+
+- `data/raw/`
+- `data/artifacts/`
+
+
+#### LLM usage: 
+    

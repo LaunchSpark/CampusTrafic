@@ -1,5 +1,5 @@
 {
-    "phase_00_syntheticGen": {
+    "phase_00_syntheticGen--all": {
         "step_01_build_world": {
             "num_lines": 1000
         },
@@ -16,50 +16,69 @@
             "custom_param": 10
         }
     },
-    "phase_01_build_world": {
+    "phase_01_build_world--Lucas_Starkey": {
         "step_01_build_devices": {
-            "is_synthetic": true
-        },
-        "step_02_build_wap_index": {
-            "is_synthetic": true
-        },
-        "step_03_resolve_people": {
             "is_synthetic": true,
+            "kwargs": null
+        },
+        "step_02_build_wap_index": {},
+        "step_03_resolve_people": {
             "threshold_minutes": 5.0,
             "overlap_threshold": 0.8
         },
         "step_04_build_graph": {
+            "is_synthetic": true,
+            "kwargs": null
+        },
+        "step_05_build_journeys": {
+            "stay_threshold_mins": 7.0,
+            "is_synthetic": true,
+            "kwargs": null
+        },
+        "step_06_interpolate_paths": {
+            "kwargs": null
+        },
+        "step_07_build_field": {
+            "sample_step": 15,
+            "sigma_multiplier": 2.0,
+            "tangent_alpha": 0.8,
+            "kwargs": null
+        },
+        "step_08_package_world": {
+            "kwargs": null
+        }
+    },
+    "phase_02_explore--Trigg_Lampkins": {
+        "step_01_clean": {
+            "custom_param": 10,
+            "is_synthetic": false,
+            "kwargs": null
+        },
+        "step_02_evaluation": {
+            "custom_param": 10
+        }
+    },
+    "phase_03_baseline--Trey_Gannod": {
+        "step_01_baseline": {
+            "custom_param": 10,
+            "is_synthetic": false,
+            "time_threshold_minutes": 120
+        },
+        "step_02_evaluation": {
+            "custom_param": 10,
             "is_synthetic": true
         }
     },
-    "phase_02_explore": {
-        "step_01_clean": {
-            "is_synthetic": true,
-            "custom_param": 10
-        },
-        "step_02_evaluation": {
-            "custom_param": 10
-        }
-    },
-    "phase_03_baseline": {
-        "step_01_baseline": {
-            "is_synthetic": true,
-            "custom_param": 10
-        },
-        "step_02_evaluation": {
-            "custom_param": 10
-        }
-    },
-    "phase_04_residual": {
+    "phase_04_residual--Isaiah_Chastain": {
         "step_01_residual": {
-            "is_synthetic": true,
-            "custom_param": 10
+            "custom_param": 10,
+            "is_synthetic": true
         }
     },
-    "phase_05_visualize": {
+    "phase_05_visualize--Mikel_Gonzalez": {
         "step_01_visualize": {
-            "is_synthetic": true,
-            "custom_param": 10
+            "custom_param": 10,
+            "is_synthetic": true
         }
     }
 }
