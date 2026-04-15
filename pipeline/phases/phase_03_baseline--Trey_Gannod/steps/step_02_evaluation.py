@@ -225,7 +225,7 @@ def run(
 
     evaluation = BaselineEvaluation()
 
-    plot_output_path = OUTPUT.replace(".pkl", "_predicted_vs_actual.png")
+    plot_output_path = OUTPUT.replace(".pkl", "_predicted_vs_actual.svg")
 
     evaluation.process(
         baseline_model,

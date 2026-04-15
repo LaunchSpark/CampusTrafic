@@ -70,9 +70,13 @@
         }
     },
     "phase_04_residual--Isaiah_Chastain": {
-        "step_01_residual": {
-            "custom_param": 10,
-            "is_synthetic": true
+        "step_01_residual_count_per_waypoint": {
+            "is_synthetic": true,
+            "custom_param": 10
+        },
+        "step_02_residual_next_waypoint": {
+            "is_synthetic": true,
+            "custom_param": 10
         }
     },
     "phase_05_visualize--Mikel_Gonzalez": {
