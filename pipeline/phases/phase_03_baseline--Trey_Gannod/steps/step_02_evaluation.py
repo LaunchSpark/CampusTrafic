@@ -1,7 +1,8 @@
 """
-PIPELINE STEP: BASELINE EVALUATION (WITH TEST SET + R²)
-========================================================
+PIPELINE STEP: BASELINE EVALUATION (PROBABILITY + FLOW)
+======================================================
 Evaluates the BaselineTransitionModel using held-out test data.
+Now includes both probability and flow evaluation.
 """
 
 from typing import Any
@@ -44,35 +45,40 @@ class BaselineEvaluation:
         return counts
 
     # ----------------------------------------
-    # Build (actual vs predicted) comparison
+    # Build comparison points (prob + flow)
     # ----------------------------------------
-    def _build_transition_comparison_points(
+    def _build_points(
         self,
         baseline_model: BaselineTransitionModel,
         test_counts: dict
-    ) -> list[tuple[float, float, int, str, str]]:
-
-        points = []
+    ):
+        prob_points = []
+        flow_points = []
 
         for origin, destinations in test_counts.items():
             total_outbound = sum(destinations.values())
             if total_outbound == 0:
                 continue
 
-            predicted_for_origin = baseline_model.transition_probs.get(origin, {})
+            predicted_probs = baseline_model.transition_probs.get(origin, {})
+            predicted_flows = baseline_model.flow_matrix.get(origin, {})
 
             for destination, count in destinations.items():
-                actual_frequency = count / total_outbound
-                predicted_probability = float(predicted_for_origin.get(destination, 0.0))
+                # Probability
+                actual_prob = count / total_outbound
+                predicted_prob = float(predicted_probs.get(destination, 0.0))
 
-                points.append(
-                    (actual_frequency, predicted_probability, count, origin, destination)
-                )
+                # Flow
+                actual_flow = float(count)
+                predicted_flow = float(predicted_flows.get(destination, 0.0))
 
-        return points
+                prob_points.append((actual_prob, predicted_prob, count))
+                flow_points.append((actual_flow, predicted_flow, count))
+
+        return prob_points, flow_points
 
     # -----------------------------
-    # Plot function
+    # Plot (probability)
     # -----------------------------
     def _plot_predicted_vs_actual(self, points, output_path=None):
         if not points:
@@ -95,7 +101,7 @@ class BaselineEvaluation:
 
         plt.xlabel("Actual (Test Frequency)")
         plt.ylabel("Predicted (Model Probability)")
-        plt.title("Baseline Model: Predicted vs Actual (Test Set)")
+        plt.title("Baseline Model: Predicted vs Actual (Probability)")
         plt.grid(True)
         plt.legend()
 
@@ -112,25 +118,23 @@ class BaselineEvaluation:
     # Core evaluation logic
     # -----------------------------
     def process(
-    self,
-    baseline_model: BaselineTransitionModel,
-    test_journeys_data: Any,
-    plot_output_path=None,
-    custom_param: int = 10,
-    progress_callback=None
+        self,
+        baseline_model: BaselineTransitionModel,
+        test_journeys_data: Any,
+        plot_output_path=None,
+        custom_param: int = 10,
+        progress_callback=None
     ):
 
         if progress_callback:
             progress_callback(0.2)
 
-        # Build ground truth from test set
         test_counts = self._compute_test_transition_counts(test_journeys_data)
 
         if progress_callback:
             progress_callback(0.5)
 
-        # Build comparison dataset
-        points = self._build_transition_comparison_points(
+        prob_points, flow_points = self._build_points(
             baseline_model,
             test_counts
         )
@@ -138,53 +142,51 @@ class BaselineEvaluation:
         if progress_callback:
             progress_callback(0.8)
 
-        if points:
-            actual = np.array([p[0] for p in points])
-            predicted = np.array([p[1] for p in points])
-            counts = np.array([p[2] for p in points])
+        # -----------------------------
+        # Probability metrics
+        # -----------------------------
+        if prob_points:
+            actual = np.array([p[0] for p in prob_points])
+            predicted = np.array([p[1] for p in prob_points])
+            counts = np.array([p[2] for p in prob_points])
 
             errors = predicted - actual
             abs_errors = np.abs(errors)
 
-            # -----------------------------
-            # Metrics
-            # -----------------------------
+            self.metrics["prob_weighted_mae"] = float(np.average(abs_errors, weights=counts))
+            self.metrics["prob_rmse"] = float(np.sqrt(np.mean(errors ** 2)))
 
-            self.metrics["weighted_mae"] = float(np.average(abs_errors, weights=counts))
-            self.metrics["rmse"] = float(np.sqrt(np.mean(errors ** 2)))
-
-            self.metrics["pearson_corr"] = (
-                float(np.corrcoef(actual, predicted)[0, 1])
-                if len(points) > 1 else 0.0
-            )
-
-            # -----------------------------
-            # R² METRIC
-            # -----------------------------
             ss_res = np.sum((actual - predicted) ** 2)
             ss_tot = np.sum((actual - np.mean(actual)) ** 2)
+            self.metrics["prob_r2"] = float(1.0 - (ss_res / ss_tot if ss_tot > 0 else 0.0))
 
-            r2 = 1.0 - (ss_res / ss_tot if ss_tot > 0 else 0.0)
+        # -----------------------------
+        # Flow metrics
+        # -----------------------------
+        if flow_points:
+            actual = np.array([p[0] for p in flow_points])
+            predicted = np.array([p[1] for p in flow_points])
 
-            self.metrics["r2"] = float(r2)
+            errors = predicted - actual
+            abs_errors = np.abs(errors)
 
-            self.metrics["num_transitions"] = float(len(points))
+            self.metrics["flow_mae"] = float(np.mean(abs_errors))
+            self.metrics["flow_rmse"] = float(np.sqrt(np.mean(errors ** 2)))
 
-        else:
-            self.metrics["weighted_mae"] = 0.0
-            self.metrics["rmse"] = 0.0
-            self.metrics["pearson_corr"] = 0.0
-            self.metrics["r2"] = 0.0
-            self.metrics["num_transitions"] = 0.0
+            ss_res = np.sum((actual - predicted) ** 2)
+            ss_tot = np.sum((actual - np.mean(actual)) ** 2)
+            self.metrics["flow_r2"] = float(1.0 - (ss_res / ss_tot if ss_tot > 0 else 0.0))
 
+        self.metrics["num_transitions"] = float(len(prob_points))
+
+        # Print metrics
         print("\n================ BASELINE EVALUATION METRICS ================\n")
-
         for key, value in self.metrics.items():
             print(f"{key}: {value}")
-
         print("\n=============================================================\n")
 
-        self._plot_predicted_vs_actual(points, output_path=plot_output_path)
+        # Plot probability comparison
+        self._plot_predicted_vs_actual(prob_points, output_path=plot_output_path)
 
         if progress_callback:
             progress_callback(1.0)
@@ -198,7 +200,7 @@ class BaselineEvaluation:
 
 
 # -----------------------------
-# Pipeline paths
+# Paths
 # -----------------------------
 run_id = os.environ.get('PIPELINE_RUN_ID', 'EXAMPLE_RUN_ID')
 
@@ -217,9 +219,8 @@ def run(
         raise FileNotFoundError("Missing trained model. Run step_01 first.")
 
     if not os.path.exists(TEST_INPUT):
-        raise FileNotFoundError("Missing test set. Run updated step_01 first.")
+        raise FileNotFoundError("Missing test set. Run step_01 first.")
 
-    # Load model + test data
     baseline_model = BaselineTransitionModel.load(MODEL_INPUT)
     test_journeys = load_draft(TEST_INPUT)
 

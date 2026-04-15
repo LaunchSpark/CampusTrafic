@@ -1,8 +1,12 @@
 """
-PIPELINE STEP: BASELINE TRANSITION MODEL (WITH TRAIN/TEST SPLIT)
-================================================================
+PIPELINE STEP: BASELINE TRANSITION MODEL (WITH TRAIN/TEST SPLIT + FLOW)
+=======================================================================
 Builds a transition probability model using 70% of the data,
 and saves the remaining 30% for evaluation.
+
+Adds:
+- outbound_totals (magnitude per node)
+- flow_matrix (expected transitions)
 """
 
 from collections import defaultdict
@@ -17,11 +21,19 @@ from pipelineio.state import load_draft, save_draft
 
 @dataclass
 class BaselineTransitionModel:
-    # Global metrics
+    # Directional metrics
     transition_counts: dict[str, dict[str, int]] = field(
         default_factory=lambda: defaultdict(lambda: defaultdict(int))
     )
     transition_probs: dict[str, dict[str, float]] = field(
+        default_factory=lambda: defaultdict(dict)
+    )
+
+    # New: magnitude
+    outbound_totals: dict[str, int] = field(default_factory=dict)
+
+    # New: flow (expected counts)
+    flow_matrix: dict[str, dict[str, float]] = field(
         default_factory=lambda: defaultdict(dict)
     )
 
@@ -38,14 +50,15 @@ class BaselineTransitionModel:
     ) -> None:
         total_users = len(journeys_data.journeys)
 
-        # Iterate over journeys (TRAIN SET ONLY)
+        # -----------------------------
+        # COUNT TRANSITIONS (TRAIN SET)
+        # -----------------------------
         for idx, journey in enumerate(journeys_data.journeys):
             if progress_callback and idx % max(1, total_users // 25) == 0:
                 progress_callback(idx / max(1, total_users) * 0.9)
 
             waypoints = journey.waypoints
 
-            # Count transitions
             for i in range(len(waypoints) - 1):
                 wp_a = waypoints[i]
                 wp_b = waypoints[i + 1]
@@ -56,10 +69,13 @@ class BaselineTransitionModel:
                 node_b = wp_b.wap_id
 
                 if node_a != node_b and time_diff_minutes <= time_threshold_minutes:
-                    # Global count
+                    # Count transition
                     self.transition_counts[node_a][node_b] += 1
 
-                    # Hourly count
+                    # Track total outbound volume
+                    self.outbound_totals[node_a] = self.outbound_totals.get(node_a, 0) + 1
+
+                    # Hourly tracking
                     try:
                         journey_hour = datetime.fromtimestamp(
                             wp_a.timestamp / 1000.0
@@ -68,18 +84,38 @@ class BaselineTransitionModel:
                     except Exception:
                         pass
 
-        # Convert counts → probabilities
+        # -----------------------------
+        # CONVERT TO PROBABILITIES
+        # -----------------------------
         for origin, destinations in self.transition_counts.items():
             total_outbound = sum(destinations.values())
+
+            if total_outbound == 0:
+                continue
+
             for destination, count in destinations.items():
                 self.transition_probs[origin][destination] = count / total_outbound
+
+        # -----------------------------
+        # BUILD FLOW MATRIX
+        # -----------------------------
+        for origin, destinations in self.transition_probs.items():
+            total = self.outbound_totals.get(origin, 0)
+
+            for destination, prob in destinations.items():
+                self.flow_matrix[origin][destination] = prob * total
 
         if progress_callback:
             progress_callback(0.99)
 
-        # Convert defaultdicts → dicts for pickling
+        # -----------------------------
+        # CLEAN FOR PICKLING
+        # -----------------------------
         self.transition_counts = {k: dict(v) for k, v in self.transition_counts.items()}
         self.transition_probs = {k: dict(v) for k, v in self.transition_probs.items()}
+        self.flow_matrix = {k: dict(v) for k, v in self.flow_matrix.items()}
+        self.outbound_totals = dict(self.outbound_totals)
+
         self.hourly_counts = {
             hour: {orig: dict(dests) for orig, dests in origin_data.items()}
             for hour, origin_data in self.hourly_counts.items()
@@ -107,7 +143,7 @@ OUTPUTS = [
 
 
 def run(
-    is_synthetic: bool = False,   # Recommend keeping this False now
+    is_synthetic: bool = False,
     time_threshold_minutes: int = 120,
     custom_param: int = 10,
     progress_callback=None
@@ -119,13 +155,15 @@ def run(
         target_input = target_input.replace('runs/' + run_id, 'synthetic_drafts')
         target_output = target_output.replace('runs/' + run_id, 'synthetic_drafts')
 
-    # 1. Load full dataset
+    # Load full dataset
     journeys_data = load_draft(target_input)
 
-    # 2. 70/30 TRAIN-TEST SPLIT
+    # -----------------------------
+    # TRAIN / TEST SPLIT
+    # -----------------------------
     journeys = journeys_data.journeys
 
-    random.seed(42)  # reproducibility
+    random.seed(42)
     random.shuffle(journeys)
 
     split_idx = int(0.7 * len(journeys))
@@ -135,7 +173,7 @@ def run(
     print(f"Total journeys: {len(journeys)}")
     print(f"Train: {len(train_journeys)} | Test: {len(test_journeys)}")
 
-    # 3. Train model on TRAIN set
+    # Train model
     journeys_data.journeys = train_journeys
 
     model = BaselineTransitionModel()
@@ -145,10 +183,10 @@ def run(
         progress_callback=progress_callback
     )
 
-    # 4. Save trained model
+    # Save model
     model.output(target_output)
 
-    # 5. Save TEST SET for step_02
+    # Save test set
     test_output_path = target_output.replace(
         "baseline_transitions.pkl",
         "baseline_test_journeys.pkl"
