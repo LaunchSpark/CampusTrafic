@@ -51,7 +51,7 @@
     "phase_02_explore--Trigg_Lampkins": {
         "step_01_clean": {
             "custom_param": 10,
-            "is_synthetic": true,
+            "is_synthetic": false,
             "kwargs": null
         },
         "step_02_evaluation": {
@@ -61,10 +61,12 @@
     "phase_03_baseline--Trey_Gannod": {
         "step_01_baseline": {
             "custom_param": 10,
-            "is_synthetic": true
+            "is_synthetic": false,
+            "time_threshold_minutes": 120
         },
         "step_02_evaluation": {
-            "custom_param": 10
+            "custom_param": 10,
+            "is_synthetic": true
         }
     },
     "phase_04_residual--Isaiah_Chastain": {
