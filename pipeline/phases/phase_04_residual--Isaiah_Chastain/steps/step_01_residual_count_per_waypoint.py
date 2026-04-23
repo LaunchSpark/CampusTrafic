@@ -661,6 +661,7 @@ def run(is_synthetic: bool = True, custom_param: int = 10, progress_callback=Non
     print(f"Test date range: {test_df['timestamp_utc'].min()} to {test_df['timestamp_utc'].max()}")
     print(f"Unique test WAPs: {test_df['wap_id'].nunique()}")
     print(test_df.groupby('wap_id')['traveler_count'].sum().sort_values(ascending=False).head(10))
+    #added to make run in pipeline
 
     exact_accuracy = float((pred_count == y_test.to_numpy()).mean())
     print(f"Test exact-match accuracy: {exact_accuracy:.4f}")

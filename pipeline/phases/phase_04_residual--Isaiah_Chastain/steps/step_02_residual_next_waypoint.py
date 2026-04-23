@@ -1,13 +1,9 @@
-"""
-PIPELINE STEP: XGBOOST NEXT-WAYPOINT MODEL + EVALUATION
-=======================================================
-Trains an XGBoost multiclass classifier to predict next distinct waypoint,
-then evaluates it using the same metrics/plot style as the baseline model.
-"""
-
-from dataclasses import dataclass, field
+import math
 import os
-from typing import Any
+import pickle
+import sys
+import types
+from dataclasses import dataclass, field
 
 import matplotlib
 matplotlib.use("Agg")
@@ -15,511 +11,715 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+from sklearn.metrics import r2_score
 
 from pipelineio.state import load_draft, save_draft
 
 
-# -----------------------------
-# Paths
-# -----------------------------
 run_id = os.environ.get("PIPELINE_RUN_ID", "EXAMPLE_RUN_ID")
 
-INPUTS = "next_waypoint_training_table.csv"
+INPUTS = [f"data/artifacts/runs/{run_id}/world/final_world.pkl"]
+OUTPUTS = [f"data/artifacts/runs/{run_id}/residual/modeling_dataframe.pkl"]
 
-MODEL_OUTPUT = f"data/artifacts/runs/{run_id}/residual/xgb_next_waypoint_model.pkl"
-EVAL_OUTPUT = f"data/artifacts/runs/{run_id}/residual/xgb_next_waypoint_evaluation.pkl"
+HOUR_MS = 3_600_000
 
-@dataclass
-class XGBTop1AccuracyEvaluation:
-    metrics: dict[str, float] = field(default_factory=dict)
-    plot_path: str | None = None
 
-    def _build_top1_accuracy_points(
-        self,
-        test_df: pd.DataFrame,
-        pred_proba: np.ndarray,
-        class_labels: list[str],
-    ) -> list[tuple[float, float, int, str]]:
-        """
-        Build points of:
-            (actual_top1_accuracy, mean_top1_confidence, count, origin)
+def plot_wap_actual_vs_predicted_full_range(
+    df: pd.DataFrame,
+    wap_id: str,
+    output_path: str | None = None,
+) -> None:
+    """
+    Plot actual vs predicted traveler_count for one WAP over all available timestamps.
+    Requires columns:
+      - timestamp_utc
+      - wap_id
+      - traveler_count
+      - predicted_traveler_count
+    """
+    wap_df = df[df["wap_id"].astype(str) == str(wap_id)].copy()
 
-        For each origin (current wap), compare:
-          - actual top-1 accuracy on rows from that origin
-          - mean predicted top-1 confidence on rows from that origin
-        """
-        points = []
+    if wap_df.empty:
+        print(f"No data found for wap_id={wap_id}")
+        return
 
-        pred_top1_idx = np.argmax(pred_proba, axis=1)
-        pred_top1_labels = np.array([class_labels[i] for i in pred_top1_idx])
-        pred_top1_conf = pred_proba[np.arange(len(pred_proba)), pred_top1_idx]
+    wap_df = wap_df.sort_values("timestamp_utc")
 
-        eval_df = test_df.copy()
-        eval_df["origin"] = eval_df["wap_id"].astype(str)
-        eval_df["true_label"] = eval_df["next_wap_id"].astype(str)
-        eval_df["pred_label"] = pred_top1_labels
-        eval_df["pred_conf"] = pred_top1_conf
-        eval_df["correct"] = (eval_df["true_label"] == eval_df["pred_label"]).astype(int)
+    plt.figure(figsize=(12, 5))
+    plt.plot(
+        wap_df["timestamp_utc"],
+        wap_df["traveler_count"],
+        label="Actual",
+        marker="o",
+        linewidth=1.5,
+    )
+    plt.plot(
+        wap_df["timestamp_utc"],
+        wap_df["predicted_traveler_count"],
+        label="Predicted",
+        marker="x",
+        linewidth=1.5,
+    )
+    plt.xlabel("Timestamp (UTC)")
+    plt.ylabel("Traveler Count")
+    plt.title(f"Actual vs Predicted Traffic for WAP {wap_id} (Full Test Range)")
+    plt.xticks(rotation=45)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
 
-        grouped = (
-            eval_df.groupby("origin")
-            .agg(
-                actual_top1_accuracy=("correct", "mean"),
-                mean_top1_confidence=("pred_conf", "mean"),
-                count=("correct", "size"),
-            )
-            .reset_index()
-        )
-
-        for _, row in grouped.iterrows():
-            points.append(
-                (
-                    float(row["actual_top1_accuracy"]),
-                    float(row["mean_top1_confidence"]),
-                    int(row["count"]),
-                    str(row["origin"]),
-                )
-            )
-
-        return points
-
-    def _plot_top1_accuracy(self, points, output_path=None):
-        if not points:
-            print("No points to plot.")
-            return
-
-        actual = np.array([p[0] for p in points])
-        predicted = np.array([p[1] for p in points])
-        counts = np.array([p[2] for p in points])
-
-        sizes = 20 + 120 * (counts / max(counts.max(), 1))
-
-        plt.figure(figsize=(8, 6))
-        plt.scatter(actual, predicted, s=sizes, alpha=0.65, edgecolors="black")
-
-        min_v = min(actual.min(), predicted.min())
-        max_v = max(actual.max(), predicted.max())
-
-        plt.plot([min_v, max_v], [min_v, max_v], linestyle="--", label="Ideal y=x")
-
-        plt.xlabel("Actual Top-1 Accuracy")
-        plt.ylabel("Mean Top-1 Predicted Confidence")
-        plt.title("XGBoost Model: Top-1 Accuracy vs Confidence (Test Set)")
-        plt.grid(True)
-        plt.legend()
-
-        if output_path:
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            plt.savefig(output_path, dpi=150)
-            plt.close()
-            self.plot_path = output_path
-            print(f"Saved plot to {output_path}")
-        else:
-            plt.show()
-
-    def process(
-        self,
-        test_df: pd.DataFrame,
-        pred_proba: np.ndarray,
-        class_labels: list[str],
-        plot_output_path=None,
-        progress_callback=None,
-    ):
-        if progress_callback:
-            progress_callback(0.5)
-
-        points = self._build_top1_accuracy_points(
-            test_df=test_df,
-            pred_proba=pred_proba,
-            class_labels=class_labels,
-        )
-
-        pred_top1_idx = np.argmax(pred_proba, axis=1)
-        pred_top1_labels = np.array([class_labels[i] for i in pred_top1_idx])
-        true_labels = test_df["next_wap_id"].astype(str).to_numpy()
-        correct = (pred_top1_labels == true_labels).astype(int)
-
-        if progress_callback:
-            progress_callback(0.8)
-
-        if len(correct) > 0:
-            self.metrics["top1_accuracy"] = float(correct.mean())
-        else:
-            self.metrics["top1_accuracy"] = 0.0
-
-        if points:
-            actual = np.array([p[0] for p in points])
-            predicted = np.array([p[1] for p in points])
-            counts = np.array([p[2] for p in points])
-
-            errors = predicted - actual
-            abs_errors = np.abs(errors)
-
-            self.metrics["weighted_mae"] = float(np.average(abs_errors, weights=counts))
-            self.metrics["rmse"] = float(np.sqrt(np.mean(errors ** 2)))
-            self.metrics["pearson_corr"] = (
-                float(np.corrcoef(actual, predicted)[0, 1]) if len(points) > 1 else 0.0
-            )
-
-            ss_res = np.sum((actual - predicted) ** 2)
-            ss_tot = np.sum((actual - np.mean(actual)) ** 2)
-            self.metrics["r2"] = float(1.0 - (ss_res / ss_tot if ss_tot > 0 else 0.0))
-            self.metrics["num_origins"] = float(len(points))
-        else:
-            self.metrics["weighted_mae"] = 0.0
-            self.metrics["rmse"] = 0.0
-            self.metrics["pearson_corr"] = 0.0
-            self.metrics["r2"] = 0.0
-            self.metrics["num_origins"] = 0.0
-
-        print("\n================ TOP-1 ACCURACY EVALUATION ================\n")
-        for key, value in self.metrics.items():
-            print(f"{key}: {value}")
-        print("\n==========================================================\n")
-
-        self._plot_top1_accuracy(points, output_path=plot_output_path)
-
-        if progress_callback:
-            progress_callback(1.0)
-
-    def output(self, output_path: str) -> None:
+    if output_path:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        save_draft(self, output_path)
+        plt.savefig(output_path, dpi=150)
+        plt.close()
+        print(f"Saved actual-vs-predicted WAP plot to {output_path}")
+    else:
+        plt.show()
+
+
+def plot_wap_week_traffic(
+    df: pd.DataFrame,
+    wap_id: str,
+    start_date: str,
+    output_path: str | None = None,
+) -> None:
+    """
+    Plot actual traveler_count for one WAP over a 7-day window.
+    """
+    start_ts = pd.Timestamp(start_date, tz="UTC")
+    end_ts = start_ts + pd.Timedelta(days=7)
+
+    wap_df = df[
+        (df["wap_id"].astype(str) == str(wap_id))
+        & (df["timestamp_utc"] >= start_ts)
+        & (df["timestamp_utc"] < end_ts)
+    ].copy()
+
+    if wap_df.empty:
+        print(f"No data found for wap_id={wap_id} between {start_ts} and {end_ts}")
+        return
+
+    wap_df = wap_df.sort_values("timestamp_utc")
+
+    plt.figure(figsize=(12, 5))
+    plt.plot(wap_df["timestamp_utc"], wap_df["traveler_count"], marker="o", linewidth=1.5)
+    plt.xlabel("Timestamp (UTC)")
+    plt.ylabel("Traveler Count")
+    plt.title(f"Traffic for WAP {wap_id} from {start_ts.date()} to {end_ts.date()}")
+    plt.xticks(rotation=45)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    if output_path:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        plt.savefig(output_path, dpi=150)
+        plt.close()
+        print(f"Saved WAP traffic plot to {output_path}")
+    else:
+        plt.show()
+
+
+def plot_residuals(actual, predicted, output_path=None):
+    actual = np.asarray(actual, dtype=float)
+    predicted = np.asarray(predicted, dtype=float)
+    residuals = predicted - actual
+
+    plt.figure(figsize=(8, 6))
+    plt.scatter(actual, residuals, s=18, alpha=0.35, edgecolors="none")
+    plt.axhline(0, linestyle="--", linewidth=1.5, color="red")
+    plt.xlabel("Actual traveler count")
+    plt.ylabel("Residual (predicted - actual)")
+    plt.title("Residuals vs Actual")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    if output_path:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        plt.savefig(output_path, dpi=150)
+        plt.close()
+        print(f"Saved residual plot to {output_path}")
+    else:
+        plt.show()
+
+
+def plot_predicted_vs_actual(
+    actual: np.ndarray,
+    predicted: np.ndarray,
+    output_path: str | None = None,
+    title: str = "Residual Model: Predicted vs Actual (Test Set)",
+    normalize: bool = True,
+) -> None:
+    """
+    Scatter plot of predicted vs actual values.
+    """
+    actual = np.asarray(actual, dtype=float)
+    predicted = np.asarray(predicted, dtype=float)
+
+    if len(actual) == 0 or len(predicted) == 0:
+        print("No points to plot.")
+        return
+
+    shared_max = max(actual.max(), predicted.max(), 1.0)
+
+    if normalize:
+        actual_plot = actual / shared_max
+        predicted_plot = predicted / shared_max
+        xlabel = "Actual (Test Data, normalized)"
+        ylabel = "Predicted (Model, normalized)"
+        min_v, max_v = 0.0, 1.0
+    else:
+        actual_plot = actual
+        predicted_plot = predicted
+        xlabel = "Actual (Test Data)"
+        ylabel = "Predicted (Model)"
+        min_v = min(actual_plot.min(), predicted_plot.min())
+        max_v = max(actual_plot.max(), predicted_plot.max())
+
+    sizes = 20 + 120 * (actual / shared_max)
+
+    plt.figure(figsize=(8, 6))
+    plt.scatter(
+        actual_plot,
+        predicted_plot,
+        s=sizes,
+        alpha=0.65,
+        edgecolors="black",
+        linewidths=0.7,
+    )
+
+    plt.plot(
+        [min_v, max_v],
+        [min_v, max_v],
+        linestyle="--",
+        linewidth=1.5,
+        label="Ideal y=x",
+    )
+
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+
+    if output_path:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        plt.savefig(output_path, dpi=150)
+        plt.close()
+        print(f"Saved predicted-vs-actual plot to {output_path}")
+    else:
+        plt.show()
+
+
+def plot_regression_accuracy_metrics(
+    actual: np.ndarray,
+    predicted: np.ndarray,
+    output_path: str | None = None,
+) -> None:
+    actual = np.asarray(actual, dtype=float)
+    predicted = np.asarray(predicted, dtype=float)
+
+    if len(actual) == 0:
+        print("No data to plot.")
+        return
+
+    exact_acc = float((predicted == actual).mean())
+    acc_pm1 = float((np.abs(predicted - actual) <= 1).mean())
+    acc_pm2 = float((np.abs(predicted - actual) <= 2).mean())
+
+    denom = np.maximum(actual, 1.0)
+    pct_error = np.abs(predicted - actual) / denom
+    acc_10pct = float((pct_error <= 0.10).mean())
+    acc_20pct = float((pct_error <= 0.20).mean())
+
+    labels = [
+        "Exact match",
+        "Within ±1",
+        "Within ±2",
+        "Within 10%",
+        "Within 20%",
+    ]
+    values = [exact_acc, acc_pm1, acc_pm2, acc_10pct, acc_20pct]
+
+    plt.figure(figsize=(8, 5))
+    bars = plt.bar(labels, values)
+    plt.ylim(0, 1.0)
+    plt.ylabel("Accuracy")
+    plt.title("Regression Accuracy Metrics (Test Set)")
+    plt.grid(axis="y", alpha=0.3)
+
+    for bar, val in zip(bars, values):
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            min(val + 0.02, 0.98),
+            f"{val:.3f}",
+            ha="center",
+            va="bottom",
+        )
+
+    plt.tight_layout()
+
+    if output_path:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        plt.savefig(output_path, dpi=150)
+        plt.close()
+        print(f"Saved regression accuracy plot to {output_path}")
+    else:
+        plt.show()
+
 
 @dataclass
-class XGBNextWaypointModel:
+class ModelingDataset:
+    features: pd.DataFrame = field(default_factory=pd.DataFrame)
     feature_columns: list[str] = field(default_factory=list)
-    class_labels: list[str] = field(default_factory=list)
-    model: Any = None
+    target_column: str = "traveler_count"
+    split_column: str = "dataset_split"
 
     def output(self, output_path: str) -> None:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         save_draft(self, output_path)
 
     @classmethod
-    def load(cls, input_path: str) -> "XGBNextWaypointModel":
+    def load(cls, input_path: str) -> "ModelingDataset":
         return load_draft(input_path)
 
 
-@dataclass
-class XGBNextWaypointEvaluation:
-    metrics: dict[str, float] = field(default_factory=dict)
-    plot_path: str | None = None
+def _install_phase01_pickle_stubs() -> None:
+    """Registers lightweight stand-ins so phase-01 world artifacts can unpickle here."""
+    module_names = [
+        "pipeline.phases.phase_01_build_world__Lucas_Starkey.steps.step_04_build_graph",
+        "pipeline.phases.phase_01_build_world__Lucas_Starkey.steps.step_08_package_world",
+    ]
 
-    def _build_transition_comparison_points(
-        self,
-        test_df: pd.DataFrame,
-        pred_proba: np.ndarray,
-        class_labels: list[str],
-    ) -> list[tuple[float, float, int, str, str]]:
-        """
-        Build points of:
-            (actual_frequency, predicted_probability, count, origin, destination)
+    for name in module_names:
+        if name not in sys.modules:
+            sys.modules[name] = types.ModuleType(name)
 
-        For each origin (current wap), compare:
-          - actual test frequency to each destination
-          - mean predicted probability to each destination
-        """
-        points = []
+    graph_module = sys.modules[module_names[0]]
+    world_module = sys.modules[module_names[1]]
 
-        class_index_to_label = {i: label for i, label in enumerate(class_labels)}
+    if not hasattr(graph_module, "Graph"):
+        @dataclass
+        class Graph:
+            nodes: dict[str, dict[str, str]] = field(default_factory=dict)
+            node_counts: dict[str, int] = field(default_factory=dict)
+            physical_edges: dict[str, dict[str, float]] = field(default_factory=dict)
 
-        test_df = test_df.copy()
-        test_df["origin"] = test_df["wap_id"].astype(str)
-        test_df["destination"] = test_df["next_wap_id"].astype(str)
+        Graph.__module__ = graph_module.__name__
+        graph_module.Graph = Graph
 
-        # Actual counts per (origin, destination)
-        actual_counts = (
-            test_df.groupby(["origin", "destination"])
-            .size()
-            .rename("count")
-            .reset_index()
-        )
+    if not hasattr(world_module, "WAPTimeslot"):
+        @dataclass
+        class WAPTimeslot:
+            wap_id: str
+            hour_key: int
+            raw_u: float = 0.0
+            raw_v: float = 0.0
+            magnitude: float = 0.0
+            dir_u: float = 0.0
+            dir_v: float = 0.0
+            traveler_count: int = 0
 
-        # Total outbound per origin
-        outbound_counts = (
-            test_df.groupby("origin")
-            .size()
-            .rename("total_outbound")
-            .reset_index()
-        )
+        WAPTimeslot.__module__ = world_module.__name__
+        world_module.WAPTimeslot = WAPTimeslot
 
-        actual_counts = actual_counts.merge(outbound_counts, on="origin", how="left")
-        actual_counts["actual_frequency"] = actual_counts["count"] / actual_counts["total_outbound"]
+    if not hasattr(world_module, "FlowSample"):
+        @dataclass
+        class FlowSample:
+            x: float
+            y: float
+            raw_u: float
+            raw_v: float
+            magnitude: float
+            dir_u: float
+            dir_v: float
 
-        # Mean predicted probability per (origin, destination)
-        pred_df = pd.DataFrame(pred_proba, columns=[class_index_to_label[i] for i in range(pred_proba.shape[1])])
-        pred_df["origin"] = test_df["origin"].to_numpy()
+        FlowSample.__module__ = world_module.__name__
+        world_module.FlowSample = FlowSample
 
-        predicted_records = []
-        for origin, group in pred_df.groupby("origin"):
-            mean_probs = group.drop(columns=["origin"]).mean(axis=0)
-            for destination, mean_prob in mean_probs.items():
-                predicted_records.append(
-                    {
-                        "origin": origin,
-                        "destination": destination,
-                        "predicted_probability": float(mean_prob),
-                    }
-                )
+    if not hasattr(world_module, "World"):
+        @dataclass
+        class World:
+            graph: object = None
+            wap_timeslots: dict = field(default_factory=dict)
+            flow_timeslots: dict = field(default_factory=dict)
 
-        predicted_df = pd.DataFrame(predicted_records)
+        World.__module__ = world_module.__name__
+        world_module.World = World
 
-        merged = actual_counts.merge(
-            predicted_df,
-            on=["origin", "destination"],
-            how="left",
-        )
-        merged["predicted_probability"] = merged["predicted_probability"].fillna(0.0)
 
-        for _, row in merged.iterrows():
-            points.append(
-                (
-                    float(row["actual_frequency"]),
-                    float(row["predicted_probability"]),
-                    int(row["count"]),
-                    str(row["origin"]),
-                    str(row["destination"]),
-                )
+def _load_world_artifact(input_path: str):
+    _install_phase01_pickle_stubs()
+    with open(input_path, "rb") as f:
+        return pickle.load(f)
+
+
+def _flatten_world_to_frame(world, progress_callback=None) -> pd.DataFrame:
+    graph = world.graph
+    hour_keys = sorted(set(world.wap_timeslots.keys()) | set(world.flow_timeslots.keys()))
+    wap_ids = sorted(graph.nodes.keys())
+
+    total_rows = max(1, len(hour_keys) * len(wap_ids))
+    built_rows = 0
+    rows: list[dict] = []
+
+    for hour_idx, hour_key in enumerate(hour_keys):
+        hour_bucket = world.wap_timeslots.get(hour_key, {})
+        for wap_id in wap_ids:
+            timeslot = hour_bucket.get(wap_id)
+            meta = graph.nodes.get(wap_id, {})
+
+            rows.append(
+                {
+                    "hour_key": hour_key,
+                    "wap_id": wap_id,
+                    "traveler_count": int(getattr(timeslot, "traveler_count", 0) or 0),
+                    "raw_u": float(getattr(timeslot, "raw_u", 0.0) or 0.0),
+                    "raw_v": float(getattr(timeslot, "raw_v", 0.0) or 0.0),
+                    "magnitude": float(getattr(timeslot, "magnitude", 0.0) or 0.0),
+                    "dir_u": float(getattr(timeslot, "dir_u", 0.0) or 0.0),
+                    "dir_v": float(getattr(timeslot, "dir_v", 0.0) or 0.0),
+                    "building": meta.get("building", "UNKNOWN"),
+                    "room": meta.get("room", "UNKNOWN"),
+                    "sub_room": meta.get("subRoom", "NONE"),
+                    "node_unique_people": int(graph.node_counts.get(wap_id, 0)),
+                }
             )
+            built_rows += 1
 
-        return points
+        if progress_callback and hour_idx % max(1, len(hour_keys) // 20) == 0:
+            progress_callback(0.1 + 0.25 * (built_rows / total_rows))
 
-    def _plot_predicted_vs_actual(self, points, output_path=None):
-        if not points:
-            print("No points to plot.")
-            return
+    df = pd.DataFrame(rows)
+    df["timestamp_utc"] = pd.to_datetime(df["hour_key"], unit="ms", utc=True)
+    df["date"] = df["timestamp_utc"].dt.date.astype(str)
+    df["hour_of_day"] = df["timestamp_utc"].dt.hour
+    df["day_of_week"] = df["timestamp_utc"].dt.dayofweek
+    df["day_of_month"] = df["timestamp_utc"].dt.day
+    df["month"] = df["timestamp_utc"].dt.month
+    df["week_of_year"] = df["timestamp_utc"].dt.isocalendar().week.astype(int)
+    df["is_weekend"] = df["day_of_week"].isin([5, 6]).astype(int)
+    df["is_month_start"] = df["timestamp_utc"].dt.is_month_start.astype(int)
+    df["is_month_end"] = df["timestamp_utc"].dt.is_month_end.astype(int)
+    df["target_log1p"] = df["traveler_count"].map(math.log1p)
+    df.sort_values(["wap_id", "hour_key"], inplace=True)
+    df.reset_index(drop=True, inplace=True)
+    return df
 
-        actual = np.array([p[0] for p in points])
-        predicted = np.array([p[1] for p in points])
-        counts = np.array([p[2] for p in points])
 
-        sizes = 20 + 120 * (counts / max(counts.max(), 1))
+def _add_temporal_features(df: pd.DataFrame, progress_callback=None) -> pd.DataFrame:
+    grouped = df.groupby("wap_id", sort=False)
 
-        plt.figure(figsize=(8, 6))
-        plt.scatter(actual, predicted, s=sizes, alpha=0.65, edgecolors="black")
-
-        min_v = min(actual.min(), predicted.min())
-        max_v = max(actual.max(), predicted.max())
-
-        plt.plot([min_v, max_v], [min_v, max_v], linestyle="--", label="Ideal y=x")
-
-        plt.xlabel("Actual (Test Frequency)")
-        plt.ylabel("Predicted (Model Probability)")
-        plt.title("XGBoost Model: Predicted vs Actual (Test Set)")
-        plt.grid(True)
-        plt.legend()
-
-        if output_path:
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            plt.savefig(output_path, dpi=150)
-            plt.close()
-            self.plot_path = output_path
-            print(f"Saved plot to {output_path}")
-        else:
-            plt.show()
-
-    def process(
-        self,
-        test_df: pd.DataFrame,
-        pred_proba: np.ndarray,
-        class_labels: list[str],
-        plot_output_path=None,
-        progress_callback=None,
-    ):
+    lag_hours = [1, 2, 3, 24, 168]
+    for idx, lag in enumerate(lag_hours, start=1):
+        df[f"lag_{lag}h"] = grouped["traveler_count"].shift(lag)
         if progress_callback:
-            progress_callback(0.5)
+            progress_callback(0.35 + 0.1 * (idx / len(lag_hours)))
 
-        points = self._build_transition_comparison_points(
-            test_df=test_df,
-            pred_proba=pred_proba,
-            class_labels=class_labels,
+    shifted = grouped["traveler_count"].shift(1)
+    rolling_windows = [3, 6, 24]
+    for idx, window in enumerate(rolling_windows, start=1):
+        rolling = shifted.groupby(df["wap_id"], sort=False).rolling(window=window, min_periods=1)
+        df[f"rolling_mean_{window}h"] = rolling.mean().reset_index(level=0, drop=True)
+        df[f"rolling_max_{window}h"] = rolling.max().reset_index(level=0, drop=True)
+        df[f"rolling_std_{window}h"] = (
+            rolling.std().reset_index(level=0, drop=True).fillna(0.0)
         )
-
         if progress_callback:
-            progress_callback(0.8)
+            progress_callback(0.45 + 0.15 * (idx / len(rolling_windows)))
 
-        if points:
-            actual = np.array([p[0] for p in points])
-            predicted = np.array([p[1] for p in points])
-            counts = np.array([p[2] for p in points])
+    df["traffic_delta_1h"] = df["traveler_count"] - df["lag_1h"].fillna(0.0)
+    df["traffic_delta_24h"] = df["traveler_count"] - df["lag_24h"].fillna(0.0)
+    return df
 
-            errors = predicted - actual
-            abs_errors = np.abs(errors)
 
-            self.metrics["weighted_mae"] = float(np.average(abs_errors, weights=counts))
-            self.metrics["rmse"] = float(np.sqrt(np.mean(errors ** 2)))
-            self.metrics["pearson_corr"] = (
-                float(np.corrcoef(actual, predicted)[0, 1]) if len(points) > 1 else 0.0
-            )
+def _add_neighbor_features(df: pd.DataFrame, graph, progress_callback=None) -> pd.DataFrame:
+    prev_hour_pivot = df.pivot(index="hour_key", columns="wap_id", values="lag_1h")
 
-            ss_res = np.sum((actual - predicted) ** 2)
-            ss_tot = np.sum((actual - np.mean(actual)) ** 2)
-            r2 = 1.0 - (ss_res / ss_tot if ss_tot > 0 else 0.0)
-            self.metrics["r2"] = float(r2)
+    neighbor_sum_frames = {}
+    neighbor_mean_frames = {}
+    neighbor_max_frames = {}
 
-            self.metrics["num_transitions"] = float(len(points))
+    wap_ids = sorted(graph.nodes.keys())
+    for idx, wap_id in enumerate(wap_ids, start=1):
+        neighbors = sorted(graph.physical_edges.get(wap_id, {}).keys())
+        if neighbors:
+            neighbor_vals = prev_hour_pivot.reindex(columns=neighbors)
+            neighbor_sum_frames[wap_id] = neighbor_vals.sum(axis=1, min_count=1).fillna(0.0)
+            neighbor_mean_frames[wap_id] = neighbor_vals.mean(axis=1).fillna(0.0)
+            neighbor_max_frames[wap_id] = neighbor_vals.max(axis=1).fillna(0.0)
         else:
-            self.metrics["weighted_mae"] = 0.0
-            self.metrics["rmse"] = 0.0
-            self.metrics["pearson_corr"] = 0.0
-            self.metrics["r2"] = 0.0
-            self.metrics["num_transitions"] = 0.0
+            zero_series = pd.Series(0.0, index=prev_hour_pivot.index)
+            neighbor_sum_frames[wap_id] = zero_series
+            neighbor_mean_frames[wap_id] = zero_series
+            neighbor_max_frames[wap_id] = zero_series
 
-        print("\n================ XGBOOST EVALUATION METRICS ================\n")
-        for key, value in self.metrics.items():
-            print(f"{key}: {value}")
-        print("\n===========================================================\n")
+        if progress_callback and idx % max(1, len(wap_ids) // 10) == 0:
+            progress_callback(0.6 + 0.15 * (idx / len(wap_ids)))
 
-        self._plot_predicted_vs_actual(points, output_path=plot_output_path)
+    neighbor_sum = pd.DataFrame(neighbor_sum_frames)
+    neighbor_mean = pd.DataFrame(neighbor_mean_frames)
+    neighbor_max = pd.DataFrame(neighbor_max_frames)
 
-        if progress_callback:
-            progress_callback(1.0)
-
-    def output(self, output_path: str) -> None:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        save_draft(self, output_path)
+    lookup_keys = pd.MultiIndex.from_frame(df[["hour_key", "wap_id"]])
+    df["neighbor_prev_hour_sum"] = neighbor_sum.stack().reindex(lookup_keys).to_numpy()
+    df["neighbor_prev_hour_mean"] = neighbor_mean.stack().reindex(lookup_keys).to_numpy()
+    df["neighbor_prev_hour_max"] = neighbor_max.stack().reindex(lookup_keys).to_numpy()
+    return df
 
 
-def run(is_synthetic: bool = False, custom_param: int = 10, progress_callback=None):
-    input_csv = INPUTS
+def _assign_time_splits(df: pd.DataFrame) -> pd.DataFrame:
+    unique_hours = sorted(df["hour_key"].unique())
+    train_cut = unique_hours[int(len(unique_hours) * 0.70)] if unique_hours else None
+    valid_cut = unique_hours[int(len(unique_hours) * 0.85)] if unique_hours else None
 
-    if not os.path.exists(input_csv):
-        raise FileNotFoundError(f"Missing training table: {input_csv}")
+    def split_label(hour_key: int) -> str:
+        if train_cut is None or valid_cut is None:
+            return "train"
+        if hour_key < train_cut:
+            return "train"
+        if hour_key < valid_cut:
+            return "validation"
+        return "test"
+
+    df["dataset_split"] = df["hour_key"].map(split_label)
+    return df
+
+
+def run(is_synthetic: bool = True, custom_param: int = 10, progress_callback=None) -> None:
+    """
+    Build a model-ready dataframe and train a first-pass XGBoost regressor.
+    """
+    input_path = INPUTS[0]
+    modeling_output_path = OUTPUTS[0]
 
     if progress_callback:
-        progress_callback(0.1)
+        progress_callback(0.02)
 
-    df = pd.read_csv(input_csv, parse_dates=["timestamp_utc", "next_timestamp_utc", "prev_timestamp_utc"])
+    world = _load_world_artifact(input_path)
 
-    # Keep rows with valid target
-    df = df[df["next_wap_id"].notna()].copy()
+    if progress_callback:
+        progress_callback(0.08)
 
-    # Feature columns
+    modeling_df = _flatten_world_to_frame(world, progress_callback=progress_callback)
+    modeling_df = _add_temporal_features(modeling_df, progress_callback=progress_callback)
+    modeling_df = _add_neighbor_features(modeling_df, world.graph, progress_callback=progress_callback)
+    modeling_df = _assign_time_splits(modeling_df)
+
+    numeric_fill_zero = [
+        "lag_1h",
+        "lag_2h",
+        "lag_3h",
+        "lag_24h",
+        "lag_168h",
+        "rolling_mean_3h",
+        "rolling_mean_6h",
+        "rolling_mean_24h",
+        "rolling_max_3h",
+        "rolling_max_6h",
+        "rolling_max_24h",
+        "rolling_std_3h",
+        "rolling_std_6h",
+        "rolling_std_24h",
+        "neighbor_prev_hour_sum",
+        "neighbor_prev_hour_mean",
+        "neighbor_prev_hour_max",
+    ]
+    modeling_df[numeric_fill_zero] = modeling_df[numeric_fill_zero].fillna(0.0)
+
     feature_columns = [
-        "wap_id",
-        "prev_wap_id",
         "hour_of_day",
         "day_of_week",
         "day_of_month",
         "month",
+        "week_of_year",
         "is_weekend",
-        "seconds_from_prev",
-        "is_stay",
-        "is_inferred"
+        "is_month_start",
+        "is_month_end",
+        "raw_u",
+        "raw_v",
+        "magnitude",
+        "dir_u",
+        "dir_v",
+        "node_unique_people",
+        "lag_1h",
+        "lag_2h",
+        "lag_3h",
+        "lag_24h",
+        "lag_168h",
+        "rolling_mean_3h",
+        "rolling_mean_6h",
+        "rolling_mean_24h",
+        "rolling_max_3h",
+        "rolling_max_6h",
+        "rolling_max_24h",
+        "rolling_std_3h",
+        "rolling_std_6h",
+        "rolling_std_24h",
+        "neighbor_prev_hour_sum",
+        "neighbor_prev_hour_mean",
+        "neighbor_prev_hour_max",
+        "building",
+        "room",
+        "sub_room",
+        "wap_id",
     ]
 
-    available_feature_columns = [c for c in feature_columns if c in df.columns]
-    if "wap_id" not in available_feature_columns:
-        raise ValueError("Expected 'wap_id' in training table.")
-    if "next_wap_id" not in df.columns:
-        raise ValueError("Expected 'next_wap_id' in training table.")
-
-    # Chronological split
-    rng = np.random.default_rng(42)
-    journey_ids = df["journey_index"].drop_duplicates().to_numpy()
-    journey_ids = rng.permutation(journey_ids)
-    split_idx = int(0.7 * len(journey_ids))
-    train_journeys = set(journey_ids[:split_idx])
-    test_journeys = set(journey_ids[split_idx:])
-    
-    train_df = df[df["journey_index"].isin(train_journeys)].copy()
-    test_df = df[df["journey_index"].isin(test_journeys)].copy()
-
-    print(f"Total rows: {len(df)}")
-    print(f"Train: {len(train_df)} | Test: {len(test_df)}")
-
-    # Encode categorical columns
-    categorical_cols = [c for c in ["wap_id", "prev_wap_id"] if c in available_feature_columns]
-    for frame in (train_df, test_df):
-        for col in categorical_cols:
-            frame[col] = frame[col].fillna("NONE").astype("category")
-
-    # Target encoding
-    class_labels = sorted(train_df["next_wap_id"].astype(str).unique())
-    class_to_idx = {label: i for i, label in enumerate(class_labels)}
-
-    # Filter test rows to seen labels only for this version
-    test_df = test_df[test_df["next_wap_id"].astype(str).isin(class_to_idx)].copy()
-
-    y_train = train_df["next_wap_id"].astype(str).map(class_to_idx)
-    y_test = test_df["next_wap_id"].astype(str).map(class_to_idx)
-
-    X_train = train_df[available_feature_columns].copy()
-
-    X_test = test_df[available_feature_columns].copy()
-
-    for col in categorical_cols:
-        X_test[col] = X_test[col].astype(str)
-        unseen_mask = ~X_test[col].isin(X_train[col].astype(str).unique())
-        X_test.loc[unseen_mask, col] = "NONE"
-        X_train[col] = X_train[col].astype(str).astype("category")
-        X_test[col] = X_test[col].astype("category")
+    dataset = ModelingDataset(
+        features=modeling_df,
+        feature_columns=feature_columns,
+        target_column="traveler_count",
+        split_column="dataset_split",
+    )
+    dataset.output(modeling_output_path)
 
     if progress_callback:
-        progress_callback(0.3)
+        progress_callback(0.80)
 
-    model = xgb.XGBClassifier(
-        objective="multi:softprob",
-        num_class=len(class_labels),
-        n_estimators=300,
-        max_depth=6,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
+    df = dataset.features.copy()
+    df = df[~df["wap_id"].astype(str).str.contains("AIEB", regex=True, na=False)].copy()
+    df = df[~df["wap_id"].astype(str).str.contains("Outdoor", regex=True, na=False)].copy()
+
+    train_df = df[df[dataset.split_column] == "train"].copy()
+    valid_df = df[df[dataset.split_column] == "validation"].copy()
+    test_df = df[df[dataset.split_column] == "test"].copy()
+
+    categorical_cols = ["building", "room", "sub_room", "wap_id"]
+    for frame in (train_df, valid_df, test_df):
+        for col in categorical_cols:
+            frame[col] = frame[col].fillna("UNKNOWN").astype("category")
+
+    X_train = train_df[dataset.feature_columns].copy()
+    y_train = train_df["target_log1p"].copy()
+    X_valid = valid_df[dataset.feature_columns].copy()
+    y_valid = valid_df["target_log1p"].copy()
+    X_test = test_df[dataset.feature_columns].copy()
+    y_test = test_df[dataset.target_column].copy()
+    y_test_log = test_df["target_log1p"].copy()
+
+    model = xgb.XGBRegressor(
+        objective="reg:squarederror",
+        eval_metric="rmse",
+        n_estimators=1000,
+        learning_rate=0.03,
+        max_depth=3,
+        min_child_weight=5,
+        subsample=0.7,
+        colsample_bytree=0.7,
+        reg_alpha=0.1,
+        reg_lambda=2.0,
+        gamma=0.1,
         random_state=42,
         enable_categorical=True,
         tree_method="hist",
-        eval_metric="mlogloss",
+        early_stopping_rounds=30,
     )
 
     model.fit(
         X_train,
         y_train,
+        eval_set=[(X_train, y_train), (X_valid, y_valid), (X_test, y_test_log)],
         verbose=False,
     )
 
-    wrapped_model = XGBNextWaypointModel(
-        feature_columns=available_feature_columns,
-        class_labels=class_labels,
-        model=model,
+    pred_log = model.predict(X_test)
+    pred_count = np.expm1(pred_log)
+    pred_count = np.clip(pred_count, 0.0, None)
+    pred_count = np.rint(pred_count).astype(int)
+
+    test_df = test_df.copy()
+    test_df["predicted_traveler_count"] = pred_count
+
+    actual_counts = y_test.to_numpy()
+
+    mae = float(np.mean(np.abs(pred_count - actual_counts)))
+    rmse = float(np.sqrt(np.mean((pred_count - actual_counts) ** 2)))
+    r_squared = float(r2_score(actual_counts, pred_count))
+
+    exact_accuracy = float((pred_count == actual_counts).mean())
+    accuracy_pm1 = float((np.abs(pred_count - actual_counts) <= 1).mean())
+    accuracy_pm2 = float((np.abs(pred_count - actual_counts) <= 2).mean())
+
+    denom = np.maximum(actual_counts, 1)
+    pct_error = np.abs(pred_count - actual_counts) / denom
+    accuracy_10pct = float((pct_error <= 0.10).mean())
+    accuracy_20pct = float((pct_error <= 0.20).mean())
+
+    residual_dir = f"data/artifacts/runs/{run_id}/residual"
+    os.makedirs(residual_dir, exist_ok=True)
+
+    scatter_plot_path = f"{residual_dir}/predicted_vs_actual.svg"
+    plot_predicted_vs_actual(
+        actual=actual_counts,
+        predicted=pred_count,
+        output_path=scatter_plot_path,
+        title="Residual Model: Predicted vs Actual (Test Set)",
+        normalize=True,
     )
-    wrapped_model.output(MODEL_OUTPUT)
+
+    plot_residuals(
+        actual=actual_counts,
+        predicted=pred_count,
+        output_path=f"{residual_dir}/residuals_vs_actual.svg",
+    )
+
+    plot_regression_accuracy_metrics(
+        actual=actual_counts,
+        predicted=pred_count,
+        output_path=f"{residual_dir}/regression_accuracy_metrics.png",
+    )
+
+    plot_wap_actual_vs_predicted_full_range(
+        df=test_df.assign(wap_id=test_df["wap_id"].astype(str)),
+        wap_id="PRSC-RM204",
+        output_path=f"{residual_dir}/wap_full_test_pred_vs_act.svg",
+    )
+
+    results = model.evals_result()
+    train_rmse = results["validation_0"]["rmse"]
+    valid_rmse = results["validation_1"]["rmse"]
+    test_rmse = results["validation_2"]["rmse"]
+
+    plot_path = f"{residual_dir}/training_rmse.png"
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(train_rmse, label="Train RMSE")
+    plt.plot(valid_rmse, label="Validation RMSE")
+    plt.plot(test_rmse, label="Test RMSE")
+    plt.xlabel("Boosting Round")
+    plt.ylabel("RMSE (log1p scale)")
+    plt.title("XGBoost RMSE During Training")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(plot_path, dpi=150)
+    plt.close()
+    print(f"Saved training RMSE plot to {plot_path}")
+
+    plot_wap_week_traffic(
+        df=modeling_df,
+        wap_id="AIEB-RM244-1",
+        start_date="2026-02-01",
+        output_path=f"{residual_dir}/wap_week_traffic.png",
+    )
 
     if progress_callback:
-        progress_callback(0.6)
+        progress_callback(1.0)
 
-    pred_proba = model.predict_proba(X_test)
-
-    top1_eval = XGBTop1AccuracyEvaluation()
-    top1_plot_output_path = EVAL_OUTPUT.replace(".pkl", "_top1_accuracy_vs_confidence.svg")
-    top1_eval_output_path = EVAL_OUTPUT.replace(".pkl", "_top1_accuracy.pkl")
-
-    top1_eval.process(
-        test_df=test_df,
-        pred_proba=pred_proba,
-        class_labels=class_labels,
-        plot_output_path=top1_plot_output_path,
-        progress_callback=progress_callback,
-    )
-
-    top1_eval.output(top1_eval_output_path)
-
-    pred_top1_idx = np.argmax(pred_proba, axis=1)
-    y_test_array = y_test.to_numpy()
-
-    accuracy = float((pred_top1_idx == y_test_array).mean())
-    print(f"Test accuracy (top-1): {accuracy:.4f}")
-
-    evaluation = XGBNextWaypointEvaluation()
-    plot_output_path = EVAL_OUTPUT.replace(".pkl", "_predicted_vs_actual.svg")
-
-    evaluation.process(
-        test_df=test_df,
-        pred_proba=pred_proba,
-        class_labels=class_labels,
-        plot_output_path=plot_output_path,
-        progress_callback=progress_callback,
-    )
-
-    evaluation.output(EVAL_OUTPUT)
+    print(f"Built modeling dataframe with {len(modeling_df):,} rows.")
+    print(f"Unique WAPs: {modeling_df['wap_id'].nunique():,}")
+    print(f"Unique hours: {modeling_df['hour_key'].nunique():,}")
+    print(f"Saved modeling dataset to {modeling_output_path}")
+    print(f"Train rows: {len(train_df):,}")
+    print(f"Validation rows: {len(valid_df):,}")
+    print(f"Test rows: {len(test_df):,}")
+    print(f"Test MAE: {mae:.4f}")
+    print(f"Test RMSE: {rmse:.4f}")
+    print(f"Test R Squared: {r_squared:.4f}")
+    print(f"Test exact-match accuracy: {exact_accuracy:.4f}")
+    print(f"Test accuracy within ±1 traveler: {accuracy_pm1:.4f}")
+    print(f"Test accuracy within ±2 travelers: {accuracy_pm2:.4f}")
+    print(f"Test accuracy within 10%: {accuracy_10pct:.4f}")
+    print(f"Test accuracy within 20%: {accuracy_20pct:.4f}")
+    print(f"Test date range: {test_df['timestamp_utc'].min()} to {test_df['timestamp_utc'].max()}")
+    print(f"Unique test WAPs: {test_df['wap_id'].nunique()}")
+    print(test_df.groupby('wap_id')['traveler_count'].sum().sort_values(ascending=False).head(10))

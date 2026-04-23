@@ -9,8 +9,8 @@ from .step_03_resolve_people import People
 from .step_02_build_wap_index import WAPIndex
 
 
-SYNTHETIC_SVG_PATH = "data/raw/synthetic/export route.svg"
-REAL_SVG_SOURCE = "data/raw/real/Brun Individual Vectors.svg"
+SYNTHETIC_SVG_PATH = "../../../data/raw/synthetic/export route.svg"
+REAL_SVG_SOURCE = "C:/Users/isaia/Desktop/CampusTrafic/data/raw/real/Brun Individual Vectors.svg"
 BASE_EDGE_WEIGHT_MS = 20000.0
 INTER_BUILDING_EDGE_WEIGHT_MS = 120000.0
 
