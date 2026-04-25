@@ -10,7 +10,8 @@ from .step_02_build_wap_index import WAPIndex
 
 
 SYNTHETIC_SVG_PATH = "../../../data/raw/synthetic/export route.svg"
-REAL_SVG_SOURCE = "C:/Users/isaia/Desktop/CampusTrafic/data/raw/real/Brun Individual Vectors.svg"
+REAL_SVG_SOURCE = 'data/real/Brun Individual Vectors 1.svg'
+
 BASE_EDGE_WEIGHT_MS = 20000.0
 INTER_BUILDING_EDGE_WEIGHT_MS = 120000.0
 
@@ -247,7 +248,7 @@ run_id = os.environ.get('PIPELINE_RUN_ID', 'EXAMPLE_RUN_ID')
 OUTPUTS = [f'data/artifacts/runs/{run_id}/world/final_graph.pkl']
 
 # Note: The signature for run must match the arguments passed by ast_runner
-def run(is_synthetic: bool = True, progress_callback=None, **kwargs) -> None:
+def run(is_synthetic: bool = False, progress_callback=None, **kwargs) -> None:
     target_input_1 = INPUTS[0]
     target_input_2 = INPUTS[1]
     target_output = OUTPUTS[0]

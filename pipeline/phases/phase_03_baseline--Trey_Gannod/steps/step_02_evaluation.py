@@ -2,238 +2,183 @@
 PIPELINE STEP: BASELINE EVALUATION (PROBABILITY + FLOW)
 ======================================================
 Evaluates the BaselineTransitionModel using held-out test data.
-Now includes both probability and flow evaluation.
+Now includes both node probability (busyness) and edge flow evaluation.
 """
+from __future__ import annotations
 
-from typing import Any
-from dataclasses import dataclass, field
+import json
+import os
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
 import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from pipelineio.state import load_draft, save_draft
-from .step_01_baseline import BaselineTransitionModel
-import os
-from collections import defaultdict
 
-matplotlib.use("Agg")
+# Setup local imports for the AST runner
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
+from step_01_baseline import BaselineTransitionModel
+
+# Import Phase 01 World class for unpickling
+from pipeline.phases.phase_01_build_world__Lucas_Starkey.steps.step_08_package_world import World
 
 
 @dataclass
-class BaselineEvaluation:
-    metrics: dict[str, float] = field(default_factory=dict)
-    plot_path: str | None = None
+class EvaluationResult:
+    node_rmse: float
+    node_r2: float
+    edge_rmse: float
+    edge_r2: float
+    n_samples: int
 
-    # -----------------------------
-    # Build test-set actual counts
-    # -----------------------------
-    def _compute_test_transition_counts(self, journeys_data: Any) -> dict:
-        counts = defaultdict(lambda: defaultdict(int))
 
-        for journey in journeys_data.journeys:
-            waypoints = journey.waypoints
+def evaluate_model(
+    world: World, 
+    model: BaselineTransitionModel, 
+    test_hours: list[int], 
+    output_dir: Path
+) -> EvaluationResult:
+    """Evaluate baseline model against the hidden test hours."""
+    y_true_node, y_pred_node = [], []
+    y_true_edge, y_pred_edge = [], []
 
-            for i in range(len(waypoints) - 1):
-                wp_a = waypoints[i]
-                wp_b = waypoints[i + 1]
+    topology = {k: list(v.keys()) for k, v in world.graph.physical_edges.items()} if world.graph else {}
 
-                node_a = wp_a.wap_id
-                node_b = wp_b.wap_id
+    for hk in test_hours:
+        hour_of_day = int((hk / 3600_000) % 24)
+        timeslot_map = world.wap_timeslots.get(hk, {})
 
-                if node_a != node_b:
-                    counts[node_a][node_b] += 1
+        for wap_id, timeslot in timeslot_map.items():
+            mag = timeslot.magnitude
+            y_true_node.append(mag)
 
-        return counts
+            # Node outbound prediction (using fallbacks)
+            pred_mag = model.hour_node_means.get(
+                (hour_of_day, wap_id),
+                model.global_node_means.get(wap_id, model.global_mean)
+            )
+            y_pred_node.append(pred_mag)
 
-    # ----------------------------------------
-    # Build comparison points (prob + flow)
-    # ----------------------------------------
-    def _build_points(
-        self,
-        baseline_model: BaselineTransitionModel,
-        test_counts: dict
-    ):
-        prob_points = []
-        flow_points = []
+            # Edge flow predictions
+            adjacent_nodes = topology.get(wap_id, [])
+            if adjacent_nodes:
+                # Ground truth approximation: equal split (mirrors baseline assumption)
+                flow_share = mag / len(adjacent_nodes)
+                for next_node in adjacent_nodes:
+                    y_true_edge.append(flow_share)
+                    
+                    # Model's prediction for this specific edge
+                    pred_flow = model.predict_flow(hour_of_day, wap_id, next_node)
+                    y_pred_edge.append(pred_flow)
 
-        for origin, destinations in test_counts.items():
-            total_outbound = sum(destinations.values())
-            if total_outbound == 0:
-                continue
+    def compute_metrics(yt: list[float], yp: list[float]) -> tuple[float, float]:
+        if not yt: return 0.0, 0.0
+        yt_arr, yp_arr = np.array(yt), np.array(yp)
+        rmse = float(np.sqrt(np.mean((yt_arr - yp_arr)**2)))
+        ss_res = np.sum((yt_arr - yp_arr)**2)
+        ss_tot = np.sum((yt_arr - np.mean(yt_arr))**2)
+        r2 = float(1.0 - (ss_res / ss_tot)) if ss_tot > 0 else 0.0
+        return rmse, r2
 
-            predicted_probs = baseline_model.transition_probs.get(origin, {})
-            predicted_flows = baseline_model.flow_matrix.get(origin, {})
+    node_rmse, node_r2 = compute_metrics(y_true_node, y_pred_node)
+    edge_rmse, edge_r2 = compute_metrics(y_true_edge, y_pred_edge)
 
-            for destination, count in destinations.items():
-                # Probability
-                actual_prob = count / total_outbound
-                predicted_prob = float(predicted_probs.get(destination, 0.0))
-
-                # Flow
-                actual_flow = float(count)
-                predicted_flow = float(predicted_flows.get(destination, 0.0))
-
-                prob_points.append((actual_prob, predicted_prob, count))
-                flow_points.append((actual_flow, predicted_flow, count))
-
-        return prob_points, flow_points
-
-    # -----------------------------
-    # Plot (probability)
-    # -----------------------------
-    def _plot_predicted_vs_actual(self, points, output_path=None):
-        if not points:
-            print("No points to plot.")
-            return
-
-        actual = np.array([p[0] for p in points])
-        predicted = np.array([p[1] for p in points])
-        counts = np.array([p[2] for p in points])
-
-        sizes = 20 + 120 * (counts / max(counts.max(), 1))
-
-        plt.figure(figsize=(8, 6))
-        plt.scatter(actual, predicted, s=sizes, alpha=0.65, edgecolors="black")
-
-        min_v = min(actual.min(), predicted.min())
-        max_v = max(actual.max(), predicted.max())
-
-        plt.plot([min_v, max_v], [min_v, max_v], linestyle="--", label="Ideal y=x")
-
-        plt.xlabel("Actual (Test Frequency)")
-        plt.ylabel("Predicted (Model Probability)")
-        plt.title("Baseline Model: Predicted vs Actual (Probability)")
-        plt.grid(True)
-        plt.legend()
-
-        if output_path:
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            plt.savefig(output_path, dpi=150)
-            plt.close()
-            self.plot_path = output_path
-            print(f"Saved plot to {output_path}")
-        else:
-            plt.show()
-
-    # -----------------------------
-    # Core evaluation logic
-    # -----------------------------
-    def process(
-        self,
-        baseline_model: BaselineTransitionModel,
-        test_journeys_data: Any,
-        plot_output_path=None,
-        custom_param: int = 10,
-        progress_callback=None
-    ):
-
-        if progress_callback:
-            progress_callback(0.2)
-
-        test_counts = self._compute_test_transition_counts(test_journeys_data)
-
-        if progress_callback:
-            progress_callback(0.5)
-
-        prob_points, flow_points = self._build_points(
-            baseline_model,
-            test_counts
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    if y_true_node:
+        _plot_predicted_vs_actual(
+            np.array(y_true_node), np.array(y_pred_node), 
+            output_dir / "node_pred_vs_actual.png", "Node Magnitude"
+        )
+        _plot_error_distribution(
+            np.array(y_true_node) - np.array(y_pred_node), 
+            output_dir / "node_error_dist.png"
+        )
+        
+    if y_true_edge:
+        _plot_predicted_vs_actual(
+            np.array(y_true_edge), np.array(y_pred_edge), 
+            output_dir / "edge_pred_vs_actual.png", "Edge Flow"
         )
 
-        if progress_callback:
-            progress_callback(0.8)
-
-        # -----------------------------
-        # Probability metrics
-        # -----------------------------
-        if prob_points:
-            actual = np.array([p[0] for p in prob_points])
-            predicted = np.array([p[1] for p in prob_points])
-            counts = np.array([p[2] for p in prob_points])
-
-            errors = predicted - actual
-            abs_errors = np.abs(errors)
-
-            self.metrics["prob_weighted_mae"] = float(np.average(abs_errors, weights=counts))
-            self.metrics["prob_rmse"] = float(np.sqrt(np.mean(errors ** 2)))
-
-            ss_res = np.sum((actual - predicted) ** 2)
-            ss_tot = np.sum((actual - np.mean(actual)) ** 2)
-            self.metrics["prob_r2"] = float(1.0 - (ss_res / ss_tot if ss_tot > 0 else 0.0))
-
-        # -----------------------------
-        # Flow metrics
-        # -----------------------------
-        if flow_points:
-            actual = np.array([p[0] for p in flow_points])
-            predicted = np.array([p[1] for p in flow_points])
-
-            errors = predicted - actual
-            abs_errors = np.abs(errors)
-
-            self.metrics["flow_mae"] = float(np.mean(abs_errors))
-            self.metrics["flow_rmse"] = float(np.sqrt(np.mean(errors ** 2)))
-
-            ss_res = np.sum((actual - predicted) ** 2)
-            ss_tot = np.sum((actual - np.mean(actual)) ** 2)
-            self.metrics["flow_r2"] = float(1.0 - (ss_res / ss_tot if ss_tot > 0 else 0.0))
-
-        self.metrics["num_transitions"] = float(len(prob_points))
-
-        # Print metrics
-        print("\n================ BASELINE EVALUATION METRICS ================\n")
-        for key, value in self.metrics.items():
-            print(f"{key}: {value}")
-        print("\n=============================================================\n")
-
-        # Plot probability comparison
-        self._plot_predicted_vs_actual(prob_points, output_path=plot_output_path)
-
-        if progress_callback:
-            progress_callback(1.0)
-
-    # -----------------------------
-    # Save
-    # -----------------------------
-    def output(self, output_path: str) -> None:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        save_draft(self, output_path)
+    return EvaluationResult(node_rmse, node_r2, edge_rmse, edge_r2, len(y_true_node))
 
 
-# -----------------------------
-# Paths
-# -----------------------------
-run_id = os.environ.get('PIPELINE_RUN_ID', 'EXAMPLE_RUN_ID')
+def _plot_predicted_vs_actual(y_true: np.ndarray, y_pred: np.ndarray, path: Path, title_prefix: str) -> None:
+    plt.figure(figsize=(8, 6))
+    plt.scatter(y_true, y_pred, alpha=0.3, edgecolors="none", s=10)
 
-MODEL_INPUT = f'data/artifacts/runs/{run_id}/model_tree/baseline_transitions.pkl'
-TEST_INPUT = f'data/artifacts/runs/{run_id}/model_tree/baseline_test_journeys.pkl'
-OUTPUT = f'data/artifacts/runs/{run_id}/model_tree/baseline_evaluation.pkl'
+    lo = min(float(y_true.min()), float(y_pred.min()))
+    hi = max(float(y_true.max()), float(y_pred.max()))
+    plt.plot([lo, hi], [lo, hi], "r--", linewidth=1)
+
+    plt.xlabel(f"Actual {title_prefix}")
+    plt.ylabel(f"Predicted {title_prefix}")
+    plt.title(f"{title_prefix}: Predicted vs Actual")
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(path, dpi=150)
+    plt.close()
 
 
-def run(
-    is_synthetic: bool = False,
-    custom_param: int = 10,
-    progress_callback=None
-):
+def _plot_error_distribution(errors: np.ndarray, path: Path) -> None:
+    plt.figure(figsize=(8, 5))
+    plt.hist(errors, bins=40, alpha=0.75, color="teal")
+    plt.xlabel("Prediction error (actual - predicted)")
+    plt.ylabel("Frequency")
+    plt.title("Error Distribution (Node Magnitude)")
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(path, dpi=150)
+    plt.close()
 
-    if not os.path.exists(MODEL_INPUT):
-        raise FileNotFoundError("Missing trained model. Run step_01 first.")
 
-    if not os.path.exists(TEST_INPUT):
-        raise FileNotFoundError("Missing test set. Run step_01 first.")
+# ---------------------------------------------------------------------------
+# PIPELINE ENTRY POINT
+# ---------------------------------------------------------------------------
+run_id = os.environ.get("PIPELINE_RUN_ID", "EXAMPLE_RUN_ID")
 
-    baseline_model = BaselineTransitionModel.load(MODEL_INPUT)
-    test_journeys = load_draft(TEST_INPUT)
+INPUTS = [
+    f"data/artifacts/runs/{run_id}/world/final_world.pkl",
+    f"data/artifacts/runs/{run_id}/baseline/baseline_model.json",
+    f"data/artifacts/runs/{run_id}/baseline/test_hours.json"
+]
+OUTPUTS = [f"data/artifacts/runs/{run_id}/baseline/eval_plots/"]
 
-    evaluation = BaselineEvaluation()
+def run(is_synthetic: bool = False, progress_callback=None, **kwargs) -> None:
+    """Entry point for the AST Runner."""
+    world_input = INPUTS[0]
+    model_input = INPUTS[1]
+    test_hours_input = INPUTS[2]
+    target_output_dir = OUTPUTS[0]
 
-    plot_output_path = OUTPUT.replace(".pkl", "_predicted_vs_actual.svg")
+    if is_synthetic:
+        world_input = world_input.replace('world', 'synthetic')
+        model_input = model_input.replace('baseline', 'synthetic_baseline')
+        test_hours_input = test_hours_input.replace('baseline', 'synthetic_baseline')
+        target_output_dir = target_output_dir.replace('baseline', 'synthetic_baseline')
 
-    evaluation.process(
-        baseline_model,
-        test_journeys,
-        plot_output_path=plot_output_path,
-        custom_param=custom_param,
-        progress_callback=progress_callback
-    )
+    print(f"Loading Phase 01 World Object from {world_input}...")
+    world = World.load(world_input)
 
-    evaluation.output(OUTPUT)
+    print(f"Loading Baseline Model from {model_input}...")
+    model = BaselineTransitionModel.load(model_input)
+
+    print(f"Loading test set metadata from {test_hours_input}...")
+    test_hours = json.loads(Path(test_hours_input).read_text(encoding="utf-8"))
+
+    print("Evaluating Baseline Model on hidden test data...")
+    results = evaluate_model(world, model, test_hours, Path(target_output_dir))
+
+    print(f"Evaluation Complete! ({results.n_samples} timeslots evaluated)")
+    print(f"  Node Busyness - RMSE: {results.node_rmse:.4f}, R2: {results.node_r2:.4f}")
+    print(f"  Edge Flow     - RMSE: {results.edge_rmse:.4f}, R2: {results.edge_r2:.4f}")
+    print(f"Plots saved to {target_output_dir}")
+
+    if progress_callback:
+        progress_callback(1.0)
