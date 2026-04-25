@@ -73,22 +73,18 @@ class BaselineTransitionModel:
             timeslot_map = world.wap_timeslots.get(hk, {})
             
             for wap_id, timeslot in timeslot_map.items():
-                mag = timeslot.magnitude
+                # Use traveler_count to match Phase 4's target variable exactly
+                t_count = float(timeslot.traveler_count) 
                 
                 # Accumulate values for averaging
-                hour_node_acc.setdefault((hour_of_day, wap_id), []).append(mag)
-                global_node_acc.setdefault(wap_id, []).append(mag)
-                global_acc.append(mag)
+                hour_node_acc.setdefault((hour_of_day, wap_id), []).append(t_count)
+                global_node_acc.setdefault(wap_id, []).append(t_count)
+                global_acc.append(t_count)
                 
                 # Process Flow Matrix (Transitions)
                 adjacent_nodes = topology.get(wap_id, [])
                 if adjacent_nodes:
-                    # BASELINE APPROXIMATION: 
-                    # Without literal WAP coordinates mapped to the graph, we divide the 
-                    # outgoing magnitude equally among all valid physical pathways.
-                    # (A future upgraded model could use the dot product of timeslot.dir_u/v 
-                    # against the literal edge geometry to weight these shares!)
-                    flow_share = mag / len(adjacent_nodes)
+                    flow_share = t_count / len(adjacent_nodes)
                     for next_node in adjacent_nodes:
                         flow_acc.setdefault((hour_of_day, wap_id, next_node), []).append(flow_share)
 
