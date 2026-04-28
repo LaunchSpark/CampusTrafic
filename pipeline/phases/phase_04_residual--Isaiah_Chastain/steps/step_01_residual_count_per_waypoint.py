@@ -324,15 +324,12 @@ def _add_neighbor_features(df: pd.DataFrame, graph, progress_callback=None) -> p
 def _assign_time_splits(df: pd.DataFrame) -> pd.DataFrame:
     unique_hours = sorted(df["hour_key"].unique())
     train_cut = unique_hours[int(len(unique_hours) * 0.70)] if unique_hours else None
-    valid_cut = unique_hours[int(len(unique_hours) * 0.85)] if unique_hours else None
 
     def split_label(hour_key: int) -> str:
-        if train_cut is None or valid_cut is None:
+        if train_cut is None:
             return "train"
         if hour_key < train_cut:
             return "train"
-        if hour_key < valid_cut:
-            return "validation"
         return "test"
 
     df["dataset_split"] = df["hour_key"].map(split_label)
@@ -528,18 +525,33 @@ def run(is_synthetic: bool = True, custom_param: int = 10, progress_callback=Non
     df = df[~df["wap_id"].astype(str).str.contains("Outdoor", regex=True, na=False)].copy()
 
     train_df = df[df[dataset.split_column] == "train"].copy()
-    valid_df = df[df[dataset.split_column] == "validation"].copy()
     test_df = df[df[dataset.split_column] == "test"].copy()
 
+    # Use an internal eval slice from the training period for early stopping,
+    # while keeping the overall dataset split as 70/30 train/test.
+    train_hours = sorted(train_df["hour_key"].unique())
+    eval_cut = train_hours[int(len(train_hours) * 0.85)] if len(train_hours) >= 2 else None
+    if eval_cut is None:
+        fit_df = train_df
+        eval_df = train_df.tail(max(1, len(train_df) // 10)).copy()
+        fit_df = train_df.iloc[: max(1, len(train_df) - len(eval_df))].copy()
+    else:
+        fit_df = train_df[train_df["hour_key"] < eval_cut].copy()
+        eval_df = train_df[train_df["hour_key"] >= eval_cut].copy()
+
+    if len(fit_df) == 0 or len(eval_df) == 0:
+        fit_df = train_df.copy()
+        eval_df = train_df.tail(max(1, len(train_df) // 10)).copy()
+
     categorical_cols = ["building", "room", "sub_room", "wap_id"]
-    for frame in (train_df, valid_df, test_df):
+    for frame in (fit_df, eval_df, test_df):
         for col in categorical_cols:
             frame[col] = frame[col].astype("category")
 
-    X_train = train_df[dataset.feature_columns]
-    y_train = train_df["target_log1p"]
-    X_valid = valid_df[dataset.feature_columns]
-    y_valid = valid_df["target_log1p"]
+    X_train = fit_df[dataset.feature_columns]
+    y_train = fit_df["target_log1p"]
+    X_valid = eval_df[dataset.feature_columns]
+    y_valid = eval_df["target_log1p"]
     X_test = test_df[dataset.feature_columns]
     y_test = test_df[dataset.target_column]
     y_test_log = test_df["target_log1p"]
@@ -565,7 +577,7 @@ def run(is_synthetic: bool = True, custom_param: int = 10, progress_callback=Non
     model.fit(
         X_train,
         y_train,
-        eval_set=[(X_train, y_train), (X_valid, y_valid), (X_test, y_test_log)],
+        eval_set=[(X_train, y_train), (X_valid, y_valid)],
         verbose=False,
     )
 
@@ -619,7 +631,7 @@ def run(is_synthetic: bool = True, custom_param: int = 10, progress_callback=Non
 
     plot_wap_actual_vs_predicted_full_range(
         df=test_df.assign(wap_id=test_df["wap_id"].astype(str)),
-        wap_id="PRSC-RM204",
+        wap_id=busiest_wap,
         output_path=f"{residual_dir}/wap_full_test_pred_vs_act.svg",
     )
 
@@ -631,7 +643,8 @@ def run(is_synthetic: bool = True, custom_param: int = 10, progress_callback=Non
     print(f"Unique hours: {modeling_df['hour_key'].nunique():,}")
     print(f"Saved modeling dataset to {modeling_output_path}")
     print(f"Train rows: {len(train_df):,}")
-    print(f"Validation rows: {len(valid_df):,}")
+    print(f"Train-fit rows (for training): {len(fit_df):,}")
+    print(f"Train-eval rows (for early stopping): {len(eval_df):,}")
     print(f"Test rows: {len(test_df):,}")
     print(f"Test MAE: {mae:.4f}")
     print(f"Test RMSE: {rmse:.4f}")
@@ -641,14 +654,12 @@ def run(is_synthetic: bool = True, custom_param: int = 10, progress_callback=Non
 
     train_rmse = results["validation_0"]["rmse"]
     valid_rmse = results["validation_1"]["rmse"]
-    test_rmse = results["validation_2"]["rmse"]
 
     plot_path = f"data/artifacts/runs/{run_id}/residual/training_rmse.png"
 
     plt.figure(figsize=(10, 6))
     plt.plot(train_rmse, label="Train RMSE")
-    plt.plot(valid_rmse, label="Validation RMSE")
-    plt.plot(test_rmse, label="Test RMSE")
+    plt.plot(valid_rmse, label="Train-Eval RMSE")
     plt.xlabel("Boosting Round")
     plt.ylabel("RMSE (log1p scale)")
     plt.title("XGBoost RMSE During Training")
@@ -671,3 +682,5 @@ def run(is_synthetic: bool = True, custom_param: int = 10, progress_callback=Non
     pct_error = np.abs(pred_count - actual) / denom
     accuracy_within_10pct = float((pct_error <= 0.10).mean())
     print(f"Test accuracy within 10%: {accuracy_within_10pct:.4f}")
+
+    print("This makes it run")

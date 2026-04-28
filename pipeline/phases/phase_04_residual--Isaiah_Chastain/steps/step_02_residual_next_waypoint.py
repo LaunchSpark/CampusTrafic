@@ -444,28 +444,27 @@ def run(is_synthetic: bool = False, custom_param: int = 10, progress_callback=No
         raise ValueError("Expected 'next_wap_id' in training table.")
 
     ts_unique = np.sort(df["timestamp_utc"].astype("int64").unique())
-    if len(ts_unique) < 3:
+    if len(ts_unique) < 2:
         raise ValueError("Not enough unique timestamps to create time splits.")
 
+    # Overall 70/30 train/test split (no separate validation set).
     train_cut = ts_unique[int(len(ts_unique) * 0.70)]
-    valid_cut = ts_unique[int(len(ts_unique) * 0.85)]
 
     ts_int = df["timestamp_utc"].astype("int64")
     train_df = df[ts_int < train_cut].copy()
-    valid_df = df[(ts_int >= train_cut) & (ts_int < valid_cut)].copy()
-    test_df = df[ts_int >= valid_cut].copy()
+    test_df = df[ts_int >= train_cut].copy()
 
-    if len(train_df) == 0 or len(valid_df) == 0 or len(test_df) == 0:
+    if len(train_df) == 0 or len(test_df) == 0:
         raise ValueError(
             f"Time split produced empty set(s): "
-            f"train={len(train_df)}, valid={len(valid_df)}, test={len(test_df)}"
+            f"train={len(train_df)}, test={len(test_df)}"
         )
 
     print(f"Total rows before filtering: {len(df):,}")
-    print(f"Train: {len(train_df):,} | Valid: {len(valid_df):,} | Test: {len(test_df):,}")
+    print(f"Train: {len(train_df):,} | Test: {len(test_df):,}")
 
     categorical_cols = [c for c in ["wap_id", "prev_wap_id", "prev2_wap_id"] if c in available_feature_columns]
-    for frame in (train_df, valid_df, test_df):
+    for frame in (train_df, test_df):
         for col in categorical_cols:
             frame[col] = frame[col].fillna("NONE").astype(str)
 
@@ -474,12 +473,11 @@ def run(is_synthetic: bool = False, custom_param: int = 10, progress_callback=No
     kept_labels = set(train_target_counts[train_target_counts >= min_class_count].index)
 
     train_df = train_df[train_df["next_wap_id"].astype(str).isin(kept_labels)].copy()
-    valid_df = valid_df[valid_df["next_wap_id"].astype(str).isin(kept_labels)].copy()
     test_df = test_df[test_df["next_wap_id"].astype(str).isin(kept_labels)].copy()
 
-    if len(train_df) == 0 or len(valid_df) == 0 or len(test_df) == 0:
+    if len(train_df) == 0 or len(test_df) == 0:
         raise ValueError(
-            f"After rare-class filtering: train={len(train_df)}, valid={len(valid_df)}, test={len(test_df)}"
+            f"After rare-class filtering: train={len(train_df)}, test={len(test_df)}"
         )
 
     max_train_rows = int(os.environ.get("NEXT_WAP_MAX_TRAIN_ROWS", "250000"))
@@ -488,7 +486,6 @@ def run(is_synthetic: bool = False, custom_param: int = 10, progress_callback=No
         train_df = train_df.sort_values("timestamp_utc").reset_index(drop=True)
 
     print(f"Train rows after filtering/sampling: {len(train_df):,}")
-    print(f"Valid rows after filtering: {len(valid_df):,}")
     print(f"Test rows after filtering: {len(test_df):,}")
 
     class_labels = sorted(train_df["next_wap_id"].astype(str).unique())
@@ -497,12 +494,11 @@ def run(is_synthetic: bool = False, custom_param: int = 10, progress_callback=No
 
     class_to_idx = {label: i for i, label in enumerate(class_labels)}
 
-    valid_df = valid_df[valid_df["next_wap_id"].astype(str).isin(class_to_idx)].copy()
     test_df = test_df[test_df["next_wap_id"].astype(str).isin(class_to_idx)].copy()
 
-    if len(valid_df) == 0 or len(test_df) == 0:
+    if len(test_df) == 0:
         raise ValueError(
-            f"After filtering unseen targets: valid={len(valid_df)}, test={len(test_df)}"
+            f"After filtering unseen targets: test={len(test_df)}"
         )
 
     allowed_next_by_origin = (
@@ -520,12 +516,33 @@ def run(is_synthetic: bool = False, custom_param: int = 10, progress_callback=No
         print(f"Unique prev2_wap_id in train: {train_df['prev2_wap_id'].nunique():,}")
     print(f"Num features: {len(available_feature_columns):,}")
 
-    y_train = train_df["next_wap_id"].astype(str).map(class_to_idx)
-    y_valid = valid_df["next_wap_id"].astype(str).map(class_to_idx)
+    # Internal eval slice from the training period for early stopping
+    # (does not affect the overall 70/30 train/test split).
+    train_ts_unique = np.sort(train_df["timestamp_utc"].astype("int64").unique())
+    eval_cut = train_ts_unique[int(len(train_ts_unique) * 0.85)] if len(train_ts_unique) >= 2 else None
+    train_ts_int = train_df["timestamp_utc"].astype("int64")
+
+    if eval_cut is None:
+        fit_df = train_df.copy()
+        eval_df = train_df.tail(max(1, len(train_df) // 10)).copy()
+        fit_df = train_df.iloc[: max(1, len(train_df) - len(eval_df))].copy()
+    else:
+        fit_df = train_df[train_ts_int < eval_cut].copy()
+        eval_df = train_df[train_ts_int >= eval_cut].copy()
+
+    if len(fit_df) == 0 or len(eval_df) == 0:
+        fit_df = train_df.copy()
+        eval_df = train_df.tail(max(1, len(train_df) // 10)).copy()
+
+    print(f"Train-fit rows (for training): {len(fit_df):,}")
+    print(f"Train-eval rows (for early stopping): {len(eval_df):,}")
+
+    y_train = fit_df["next_wap_id"].astype(str).map(class_to_idx)
+    y_valid = eval_df["next_wap_id"].astype(str).map(class_to_idx)
     y_test = test_df["next_wap_id"].astype(str).map(class_to_idx)
 
-    X_train = train_df[available_feature_columns].copy()
-    X_valid = valid_df[available_feature_columns].copy()
+    X_train = fit_df[available_feature_columns].copy()
+    X_valid = eval_df[available_feature_columns].copy()
     X_test = test_df[available_feature_columns].copy()
 
     for col in categorical_cols:
